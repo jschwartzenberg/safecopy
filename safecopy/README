@@ -1,0 +1,87 @@
+Safe copying of files and partitions.
+
+Idea:
+
+The main problem with damaged storage hardware is,
+that once you get an unrecoverable EA error
+further reading from the file / device often fails until the file
+has been closed and re-opened.
+
+The normal copy tools like cat, cp or dd do not allow
+creation of an image file from a diskette or cdrom
+once reading of a sector failed.
+
+Safecopy tries to get as much data from the source as possible
+without device dependent tricks.
+
+(for example to get an ISO image from a copy protected 
+ or otherwise damaged CD-ROM, cdrdao and bin2iso would possibly
+ do a better and faster job)
+
+This is achieved by multiple reads from smaller sections at
+the begin of every EA error causing (i.e. damaged) area,
+skipping that area while padding the destination file with zeroes,
+and then finding and continuing at where readable data again starts.
+
+For this to work, the source device or file has to be seekable,
+so with some tape devices and alike it would probably not work.
+
+Performance and success of this tool depend extremely
+on the device driver and hardware.
+
+Usually the kernel and driver itself triy to soft-recover from EA errors,
+giving back partial data and trying to read the sectors multiple times,
+resetting the drives, turning DMA off, etc.
+
+However if the sectors are really unrecoverable you get said error
+anyway sooner or later and if it took half an hour this is not good for
+safecopies recovery performance.
+
+For example a test CD I tried to read an ISO image from
+which incidentally had many purposely damaged sectors
+an ATAPI cdrom writer running with the SCSI emulation driver
+under linux took about 1.5 seconds to recover from a
+failed read attempt, reopening and reseeking, which allowed to
+extract the ISO image in reasonable time.
+
+The same CD in a DVD ROM drive running with the standard ATAPI driver
+on the IDE bus crashed and needed over 5 minutes to recover from
+the first attempt to read from any damaged sector.
+With firmware and driver behaving like this it would take weeks
+to read the CD with this tool.
+
+
+Usage: safecopy [options] <source> <target>
+Options:
+        -b <bytes> : Blocksize in bytes, also used for skipping
+                     offset when searching for the end of a bad area.
+                     Set this to physical sectorsize of your media.
+                     Default: 512
+        -r <bytes> : Resolution in bytes when searching for the exact
+                     beginning or end of a bad area
+                     Bigger values increase performace at potential cost
+                     of valid data close to damaged areas.
+                     Default: 4
+        -s <blocks> : Start position where to start reading.
+                     Will correspond to position 0 in the destination file.
+                     Default: block 0
+        -l <blocks> : Length of data to be read.
+                      Default: size of input file
+        -h | --help : Show this text
+
+Description of output:
+        . : between 1 and 1024 blocks successfully read.
+        _ : read was incomplete. (possibly end of file)
+            blocksize is reduced to read the rest.
+        > : read failed, reducing blocksize to read partial data.
+        [xx](+yy) : current block and number of blocks (or bytes)
+                    continuously read successfully up to this point.
+        X : read failed on block with minimum blocksize and is skipped.
+            Unrecoverable error, destination file is padded with zeros.
+            Data is now skipped until end of the unreadable area is reached
+        < : Successfull read- test after the end of a bad area causes
+            backtracking to search for the first readable data.
+        [xx](+yy) : current block and number of blocks (or bytes)
+                    of recent continuous unreadable data.
+
+
