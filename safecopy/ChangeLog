@@ -1,2 +1,4 @@
 2005.06.09: Creation of project (Corvus Corax)
 
+2005.06.12: fix of lseek64 definition problem
+
