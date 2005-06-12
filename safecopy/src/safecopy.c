@@ -1,4 +1,6 @@
-#define _LARGEFILE64_SOURCE
+#define _FILE_OFFSET_BITS 64
+// make off_t a 64 bit pointer on system that support it
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -52,13 +54,13 @@ int main(int argc, char ** argv) {
 	struct arglist *carglist;
 	char *sourcefile,*destfile;
 	int source,destination;
-	off64_t readposition,writeposition;
-	off64_t startoffset,length;
+	off_t readposition,writeposition;
+	off_t startoffset,length;
 	ssize_t remain,block,writeblock,writeremain;
 	char * databuffer;
 	int blocksize,resolution;
 	int writeoffset,counter,ecounter,newerror;
-	off64_t softerr,harderr,lasterror,lastgood;
+	off_t softerr,harderr,lasterror,lastgood;
 
 	// read arguments
 	carglist=arglist_new(argc,argv);
@@ -123,14 +125,14 @@ int main(int argc, char ** argv) {
 		
 	//open files
 	fprintf(stdout,"Trying to safe copy from %s to %s ... \n",sourcefile,destfile);
-	source=open(sourcefile,O_RDONLY | O_LARGEFILE);
+	source=open(sourcefile,O_RDONLY );
 	if (source==-1) {
 		fprintf(stderr,"Error opening sourcefile: %s \n",sourcefile);
 		usage(argv[0]);
 		arglist_kill(carglist);
 		return 2;
 	}
-	destination=open(destfile,O_WRONLY | O_TRUNC | O_LARGEFILE | O_CREAT,0666 );
+	destination=open(destfile,O_WRONLY | O_TRUNC | O_CREAT,0666 );
 	if (destination==-1) {
 		close(source);
 		fprintf(stderr,"Error opening destination: %s \n",destfile);
@@ -166,7 +168,7 @@ int main(int argc, char ** argv) {
 		}
 
 		// seek and read
-		lseek64(source,readposition+startoffset,SEEK_SET);
+		lseek(source,readposition+startoffset,SEEK_SET);
 		block=read(source,databuffer,remain);
 
 		if (block>0) {
@@ -212,7 +214,7 @@ int main(int argc, char ** argv) {
 				writeoffset=0;
 
 				while (writeremain>0) {
-					lseek64(destination,writeposition,SEEK_SET);
+					lseek(destination,writeposition,SEEK_SET);
 					writeblock=write(destination,databuffer+writeoffset,writeremain);
 					if (writeblock<=0) {
 						fprintf(stderr,"\nWRITING TO %s FAILED, BAILING!\n",destfile);
@@ -269,7 +271,7 @@ int main(int argc, char ** argv) {
 
 			// reopen source file to clear possible error flags preventing us from getting more data
 			close (source);
-			source=open(sourcefile,O_RDONLY | O_LARGEFILE);
+			source=open(sourcefile,O_RDONLY );
 			if (source==-1) {
 				fprintf(stderr,"\nError on reopening sourcefile during error recovery - copy failed!\n");
 				close(destination);
