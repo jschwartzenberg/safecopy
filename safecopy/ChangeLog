@@ -2,3 +2,8 @@
 
 2005.06.12: fix of lseek64 definition problem
 
+2009.02.01:
+- Added "retry" feature.
+- Fixed output to be more consistent and posibly machine parseable to create a bad block list more easily.
+- Fixed calculation of soft and hard errors.
+

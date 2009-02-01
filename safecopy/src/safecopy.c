@@ -13,40 +13,50 @@
 #define MAXBLOCKSIZE 1048576
 #define BLOCKSIZE 512
 #define RESOLUTION 4
+#define RETRIES 2
 
 void usage(char * name) {
 	fprintf(stderr,"Usage: %s [options] <source> <target>\n",name);
 	fprintf(stderr,"Options:\n");
-	fprintf(stderr,"	-b <bytes> : Blocksize in bytes, also used for skipping\n");
-	fprintf(stderr,"	             offset when searching for the end of a bad area.\n");
-	fprintf(stderr,"	             Set this to physical sectorsize of your media.\n");
-	fprintf(stderr,"	             Default: 512\n");
+	fprintf(stderr,"	-b <bytes> : Blocksize in bytes, also used as skipping offset\n");
+	fprintf(stderr,"	             when searching for the end of a bad area.\n");
+	fprintf(stderr,"	             Set this to the physical sectorsize of your media.\n");
+	fprintf(stderr,"	             Default: %i\n",BLOCKSIZE);
 	fprintf(stderr,"	-r <bytes> : Resolution in bytes when searching for the exact\n");
-	fprintf(stderr,"	             beginning or end of a bad area\n");
-	fprintf(stderr,"	             Bigger values increase performace at potential cost\n");
-	fprintf(stderr,"	             of valid data close to damaged areas.\n");
-	fprintf(stderr,"	             Default: 4\n");
+	fprintf(stderr,"	             beginning or end of a bad area.\n");
+	fprintf(stderr,"	             Smaller values lead to very thorough attempts to read\n");
+	fprintf(stderr,"	             data at the edge of damaged areas,\n");
+	fprintf(stderr,"	             but increase the strain on the damaged media.\n");
+	fprintf(stderr,"	             Default: %i\n",RESOLUTION);
+	fprintf(stderr,"	-R <number> : At least that many read attempts are made on the first\n");
+	fprintf(stderr,"	              bad block of a damaged area with minimum resolution.\n");
+	fprintf(stderr,"	              Higher values can sometimes recover a weak sector,\n");
+	fprintf(stderr,"	              but at the cost of additional strain.\n");
+	fprintf(stderr,"	              Default: %i\n",RETRIES);
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
-	fprintf(stderr,"	             Will correspond to position 0 in the destination file.\n");
-	fprintf(stderr,"	             Default: block 0\n");
-	fprintf(stderr,"	-l <blocks> : Length of data to be read.\n");
-	fprintf(stderr,"	              Default: size of input file\n");
+	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
+	fprintf(stderr,"	              Default: block 0\n");
+	fprintf(stderr,"	-l <blocks> : Maximum length of data to be read.\n");
+	fprintf(stderr,"	              Default: Entire size of input file\n");
 	fprintf(stderr,"	-h | --help : Show this text\n\n");
 	fprintf(stderr,"Description of output:\n");
-	fprintf(stderr,"	. : between 1 and 1024 blocks successfully read.\n");
-	fprintf(stderr,"	_ : read was incomplete. (possibly end of file)\n");
-	fprintf(stderr,"	    blocksize is reduced to read the rest.\n");
-	fprintf(stderr,"	> : read failed, reducing blocksize to read partial data.\n");
-	fprintf(stderr,"	[xx](+yy) : current block and number of blocks (or bytes)\n");
-	fprintf(stderr,"	            continuously read successfully up to this point.\n");
-	fprintf(stderr,"	X : read failed on block with minimum blocksize and is skipped.\n");
+	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
+	fprintf(stderr,"	_ : Read of block was incomplete. (possibly end of file)\n");
+	fprintf(stderr,"	    The blocksize is now reduced to read the rest.\n");
+	fprintf(stderr,"	> : Read failed, reducing blocksize to read partial data.\n");
+	fprintf(stderr,"	! : A low level error on read attempt of smallest allowed size\n");
+	fprintf(stderr,"	    leads to a retry attempt.\n");
+	fprintf(stderr,"	[xx](+yy){ : Current block and number of bytes continuously\n");
+	fprintf(stderr,"	             read successfully up to this point.\n");
+	fprintf(stderr,"	X : Read failed on a block with minimum blocksize and is skipped.\n");
 	fprintf(stderr,"	    Unrecoverable error, destination file is padded with zeros.\n");
-	fprintf(stderr,"	    Data is now skipped until end of the unreadable area is reached\n");
-	fprintf(stderr,"	< : Successfull read- test after the end of a bad area causes\n");
-	fprintf(stderr,"	    backtracking to search for the first readable data.\n");
-	fprintf(stderr,"	[xx](+yy) : current block and number of blocks (or bytes)\n");
-	fprintf(stderr,"	            of recent continuous unreadable data.\n\n");
-	fprintf(stderr,"Copyright 2005, distributed under terms of the GPL\n\n");
+	fprintf(stderr,"	    Data is now skipped until end of the unreadable area is reached.\n");
+	fprintf(stderr,"	< : Successful read after the end of a bad area causes\n");
+	fprintf(stderr,"	    backtracking with smaller blocksizes to search for the first\n");
+	fprintf(stderr,"	    readable data.\n");
+	fprintf(stderr,"	}[xx](+yy) : current block and number of bytes of recent\n");
+	fprintf(stderr,"	             continuous unreadable data.\n\n");
+	fprintf(stderr,"Copyright 2009, distributed under terms of the GPL\n\n");
 }
 
 int main(int argc, char ** argv) {
@@ -55,12 +65,13 @@ int main(int argc, char ** argv) {
 	char *sourcefile,*destfile;
 	int source,destination;
 	off_t readposition,writeposition;
-	off_t startoffset,length;
+	off_t startoffset,length,writeoffset;
 	ssize_t remain,block,writeblock,writeremain;
 	char * databuffer;
-	int blocksize,resolution;
-	int writeoffset,counter,ecounter,newerror;
+	int blocksize,resolution,retries;
+	int counter,newerror,newsofterror;
 	off_t softerr,harderr,lasterror,lastgood;
+	off_t tmp_pos,tmp_bytes;
 
 	// read arguments
 	carglist=arglist_new(argc,argv);
@@ -68,6 +79,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-h",0);
 	arglist_addarg (carglist,"-b",1);
 	arglist_addarg (carglist,"-r",1);
+	arglist_addarg (carglist,"-R",1);
 	arglist_addarg (carglist,"-s",1);
 	arglist_addarg (carglist,"-l",1);
 
@@ -99,6 +111,13 @@ int main(int argc, char ** argv) {
 	if (resolution>blocksize) resolution=blocksize;
 	fprintf(stderr,"Resolution is %i bytes.\n",resolution);
 	
+	retries=RETRIES;
+	if (arglist_arggiven(carglist,"-R")==0) {
+		retries=arglist_integer(arglist_parameter(carglist,"-R",0));
+	}
+	if (retries<1) retries=1;
+	fprintf(stderr,"Attempting to read damaged data at least %i times.\n",retries);
+
 	startoffset=0;
 	if (arglist_arggiven(carglist,"-s")==0) {
 		startoffset=arglist_integer(arglist_parameter(carglist,"-s",0));
@@ -150,8 +169,8 @@ int main(int argc, char ** argv) {
 	softerr=0;
 	harderr=0;
 	counter=1;
-	ecounter=1;
-	newerror=1;
+	newerror=retries;
+	newsofterror=0;
 	lasterror=0;
 	lastgood=0;
 	
@@ -172,6 +191,12 @@ int main(int argc, char ** argv) {
 		block=read(source,databuffer,remain);
 
 		if (block>0) {
+			// successfull read, if happening during soft recovery
+			// (downscale or retry) list a single soft error
+			if (newsofterror==1) {
+				newsofterror=0;
+				softerr++;
+			}
 			// read successfull, test for end of damaged area
 			if (newerror==0) {
 				// we are in recovery since we just read past the end of a damaged area
@@ -180,25 +205,18 @@ int main(int argc, char ** argv) {
 				if (remain>resolution) {
 				 	remain=remain/2;
 					readposition-=remain;
-					write(0,&">",1);
+					write(0,&"<",1);
 				} else {
-					newerror=1;
+					newerror=retries;
 					remain=0;
-					writeremain=readposition/blocksize;
-					writeoffset=(readposition-lastgood)/blocksize;
-					if (writeoffset<4) {
-						writeoffset=readposition-lastgood;
-						sprintf(databuffer,"<[%i](+%iBytes)",writeremain,writeoffset);
-						
-					} else {
-						sprintf(databuffer,"<[%i](+%i)",writeremain,writeoffset);
-					}
+					tmp_pos=readposition/blocksize;
+					tmp_bytes=readposition-lastgood;
+					sprintf(databuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
 					write(0,databuffer,strlen(databuffer));
 					lasterror=readposition;
 				}
 				
 			} else {
-				ecounter=1;
 				if (block<remain) {
 					// not all data we wanted got read, note that
 					write(0,&"_",1);
@@ -231,41 +249,42 @@ int main(int argc, char ** argv) {
 		} else if (block<0) {
 			// write operation failed
 			counter=1;
-			if (remain > resolution && newerror==1) {
+			if (remain > resolution && newerror>0) {
 				// start of a new erroneous area - decrease readsize in
 				// case we can read partial data from the beginning
-				softerr++;
+				newsofterror=1;
 				remain=remain/2;
-
 				write(0,&">",1);
 			} else {
-				// readsize is already minimal
-				// unrecoverable error, go one sector ahead and try again there 
+				if (newerror>1) {
+					// if we are at minimal size, attempt a couple of retries
+					newsofterror=1;
+					newerror--;
+					write(0,&"!",1);
+				} else {
+					// readsize is already minimal, out of retry attempts
+					// unrecoverable error, go one sector ahead and try again there 
 
-				if (newerror==1) {
-					// if this is still the start of a damaged area,
-					// also print the amount of successfully read sectors
-					newerror=0;
-					writeremain=readposition/blocksize;
-					writeoffset=(readposition-lasterror)/blocksize;
-					if (writeoffset<4) {
-						writeoffset=readposition-lasterror;
-						sprintf(databuffer,"[%i](+%iBytes)",writeremain,writeoffset);
-						
-					} else {
-						sprintf(databuffer,"[%i](+%i)",writeremain,writeoffset);
-					}
-					write(0,databuffer,strlen(databuffer));
-					// and we set the read size high enough to go over the damaged area quickly
-					remain=blocksize;
-					lastgood=readposition;
-				} 
+					if (newerror==1) {
+						// if this is still the start of a damaged area,
+						// also print the amount of successfully read sectors
+						newsofterror=0;
+						newerror=0;
+						tmp_pos=readposition/blocksize;
+						tmp_bytes=readposition-lasterror;
+						sprintf(databuffer,"[%llu](+%llu){",tmp_pos,tmp_bytes);
+						write(0,databuffer,strlen(databuffer));
+						// and we set the read size high enough to go over the damaged area quickly
+						remain=blocksize;
+						lastgood=readposition;
+					} 
 
-				harderr++;
-				readposition+=remain;
+					harderr++;
+					readposition+=remain;
 
 
-				write(0,&"X",1);
+					write(0,&"X",1);
+				}
 
 			}
 
@@ -286,8 +305,8 @@ int main(int argc, char ** argv) {
 	} else {
 		fprintf(stdout,"with skipped parts !\n");
 	}
-	fprintf(stdout,"%lli recoverable and %lli non recoverable errors occured.\n",softerr,harderr);
-	fprintf(stdout,"%lli bytes (%lli blocks) read/written\n",readposition,readposition/blocksize);
+	fprintf(stdout,"%llu recoverable and %llu non recoverable errors occured.\n",softerr,harderr);
+	fprintf(stdout,"%llu bytes (%llu blocks) read/written\n",readposition,readposition/blocksize);
 
 	close(destination);
 	close(source);
