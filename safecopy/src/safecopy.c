@@ -180,15 +180,19 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 	sprintf(thirdarg,"%llu",old);
 	pid_t child=fork();
 	if (child==0) {
-		execlp(script,script,firstarg,secondarg,NULL);
+		execlp(script,script,firstarg,secondarg,thirdarg,NULL);
 		exit (-2);
 	} else if( child<0) {
 		return(-2);
 	}
 	waitpid(child,&status,0);
 	// return exit code - calculate bytes from blocks in case of positive exit value
-	if (WEXITSTATUS(status)<0) return (WEXITSTATUS(status));
+	if (WEXITSTATUS(status)==0) return (-2);
 	return (old+(blocksize*WEXITSTATUS(status)));
+}
+
+off_t lseek_dummy(int a,int b, int c) {
+	return -1;
 }
 
 // main
@@ -605,7 +609,9 @@ int main(int argc, char ** argv) {
 		}
 		// break lines after 40 chars to prevent backspace bug of terminals
 		if (linewidth>40) {
-			write(2,&"\n",1);
+			tmp_pos=readposition/blocksize;
+			sprintf(textbuffer," [%lli]\n",tmp_pos);
+			write(2,textbuffer,strlen(textbuffer));
 			linewidth=0;
 		}
 		output=0;
