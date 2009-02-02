@@ -7,3 +7,9 @@
 - Fixed output to be more consistent and posibly machine parseable to create a bad block list more easily.
 - Fixed calculation of soft and hard errors.
 
+2009.02.03:
+- Added badblock file creation.
+- Added incremental mode to improve a filesystem image based on an existing badblock list.
+- Automatic blocksize calculation based on stat().
+- Percentage counter in case of known filesize (or maximum size given on commandline).
+- Smily indicator based on data read timing. 

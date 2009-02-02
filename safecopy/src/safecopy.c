@@ -3,9 +3,11 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include "arglist.h"
@@ -15,13 +17,26 @@
 #define RESOLUTION 4
 #define RETRIES 2
 
+#define VERY_FAST 100
+#define FAST VERY_FAST*100
+#define SLOW FAST*10
+#define VERY_SLOW SLOW*10
+#define VERY_VERY_SLOW VERY_SLOW*10
+
+#define VERY_FAST_ICON "  ;-}"
+#define FAST_ICON "  :-)"
+#define SLOW_ICON "  :-|"
+#define VERY_SLOW_ICON "  8-("
+#define VERY_VERY_SLOW_ICON "  8-X"
+
 void usage(char * name) {
 	fprintf(stderr,"Usage: %s [options] <source> <target>\n",name);
 	fprintf(stderr,"Options:\n");
 	fprintf(stderr,"	-b <bytes> : Blocksize in bytes, also used as skipping offset\n");
 	fprintf(stderr,"	             when searching for the end of a bad area.\n");
 	fprintf(stderr,"	             Set this to the physical sectorsize of your media.\n");
-	fprintf(stderr,"	             Default: %i\n",BLOCKSIZE);
+	fprintf(stderr,"	             Default: Blocksize of input device, if determinable,\n");
+	fprintf(stderr,"	                      otherwise %i\n",BLOCKSIZE);
 	fprintf(stderr,"	-r <bytes> : Resolution in bytes when searching for the exact\n");
 	fprintf(stderr,"	             beginning or end of a bad area.\n");
 	fprintf(stderr,"	             Smaller values lead to very thorough attempts to read\n");
@@ -38,6 +53,15 @@ void usage(char * name) {
 	fprintf(stderr,"	              Default: block 0\n");
 	fprintf(stderr,"	-l <blocks> : Maximum length of data to be read.\n");
 	fprintf(stderr,"	              Default: Entire size of input file\n");
+	fprintf(stderr,"	-I <badblockfile> : Incremental mode. Assume the target file already\n");
+	fprintf(stderr,"	                    exists and has holes specified in a badblockfile.\n");
+	fprintf(stderr,"	                    It will be attempted to retrieve more data from\n");
+	fprintf(stderr,"	                    the missing areas only.\n");
+	fprintf(stderr,"	                    Default: none\n");
+	fprintf(stderr,"	-i <bytes> : Blocksize to interprete the badblockfile given with -I.\n");
+	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
+	fprintf(stderr,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
+	fprintf(stderr,"	                    Default: none\n");
 	fprintf(stderr,"	-h | --help : Show this text\n\n");
 	fprintf(stderr,"Description of output:\n");
 	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
@@ -59,19 +83,82 @@ void usage(char * name) {
 	fprintf(stderr,"Copyright 2009, distributed under terms of the GPL\n\n");
 }
 
+
+void printpercentage(unsigned int percent) {
+	char percentage[16]="100%";
+	int t=0;
+	if (percent>100) percent=100;
+	sprintf(percentage,"      %u%%",percent);
+	write(2,percentage,strlen(percentage));
+	while (percentage[t++]!='\x0') {
+		write(2,&"\b",1);
+	}
+}
+
+long int timediff(struct timeval oldtime,struct timeval newtime) {
+
+	long int usecs=newtime.tv_usec-oldtime.tv_usec;
+	usecs=usecs+((newtime.tv_sec-oldtime.tv_sec)*1000000);
+	return usecs;
+
+}
+
+int timecategory (long int time) {
+	if (time<=VERY_FAST) return VERY_FAST;
+	if (time<=FAST) return FAST;
+	if (time<=SLOW) return SLOW;
+	if (time<=VERY_SLOW) return VERY_SLOW;
+	return VERY_VERY_SLOW;
+}
+
+char* timeicon(int timecat) {
+	switch (timecat) {
+		case VERY_VERY_SLOW: return VERY_VERY_SLOW_ICON;
+		case VERY_SLOW: return VERY_SLOW_ICON;
+		case SLOW: return SLOW_ICON;
+		case FAST: return FAST_ICON;
+		case VERY_FAST: return VERY_FAST_ICON;
+	}
+	return "  ???";
+}
+
+void printtimecategory(int timecat) {
+	char * icon=timeicon(timecat);
+	int t=0;
+	write(2,icon,strlen(icon));
+	while (icon[t++]!='\x0') {
+		write(2,&"\b",1);
+	}
+}
+
+int wantabort=0;
+
+void signalhandler(int sig) {
+	wantabort=1;
+}
+
 int main(int argc, char ** argv) {
 
 	struct arglist *carglist;
-	char *sourcefile,*destfile;
-	int source,destination;
+	char *sourcefile,*destfile,*bblocksinfile,*bblocksoutfile;
+	int source,destination,bblocksout;
+	FILE *bblocksin;
 	off_t readposition,writeposition;
 	off_t startoffset,length,writeoffset;
 	ssize_t remain,block,writeblock,writeremain;
 	char * databuffer;
-	int blocksize,resolution,retries;
-	int counter,newerror,newsofterror;
+	char textbuffer[256];
+	char *tmp;
+	int blocksize,iblocksize,resolution,retries,incremental;
+	int counter,percent,oldpercent,newerror,newsofterror,backtracemode,output,linewidth;
 	off_t softerr,harderr,lasterror,lastgood;
 	off_t tmp_pos,tmp_bytes;
+	off_t lastbadblock,lastsourceblock;
+	struct stat filestatus;
+	off_t filesize,damagesize;
+	struct timeval oldtime,newtime;
+	long int elapsed,oldelapsed,oldcategory;
+	fd_set rfds,efds;
 
 	// read arguments
 	carglist=arglist_new(argc,argv);
@@ -82,6 +169,9 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-R",1);
 	arglist_addarg (carglist,"-s",1);
 	arglist_addarg (carglist,"-l",1);
+	arglist_addarg (carglist,"-o",1);
+	arglist_addarg (carglist,"-I",1);
+	arglist_addarg (carglist,"-i",1);
 
 	
 	if ((arglist_arggiven(carglist,"--help")==0)
@@ -95,13 +185,28 @@ int main(int argc, char ** argv) {
 	sourcefile=arglist_parameter(carglist,"VOIDARGS",0);
 	destfile=arglist_parameter(carglist,"VOIDARGS",1);
 	
+	// find out source file size and block size
+	filesize=0;
 	blocksize=BLOCKSIZE;
+	if(!stat(sourcefile,&filestatus)) {
+		filesize=filestatus.st_size;
+		if (filestatus.st_blksize) {
+			fprintf(stderr,"Source file blocksize is %lu bytes according to stat().\n",filestatus.st_blksize);
+			blocksize=filestatus.st_blksize;
+		}
+	}
 	if (arglist_arggiven(carglist,"-b")==0) {
 		blocksize=arglist_integer(arglist_parameter(carglist,"-b",0));
 	}
 	if (blocksize<1) blocksize=BLOCKSIZE;
 	if (blocksize>MAXBLOCKSIZE) blocksize=MAXBLOCKSIZE;
-	fprintf(stderr,"Blocksize is %i bytes.\n",blocksize);
+	fprintf(stdout,"Blocksize is %i bytes.\n",blocksize);
+
+	if (filesize!=0) {
+		fprintf(stderr,"Determined input file size is %llu bytes.\n");
+	} else {
+		fprintf(stderr,"Unable to determine input file size.\n");
+	}
 	
 	resolution=RESOLUTION;
 	if (arglist_arggiven(carglist,"-r")==0) {
@@ -109,21 +214,44 @@ int main(int argc, char ** argv) {
 	}
 	if (resolution<1) resolution=RESOLUTION;
 	if (resolution>blocksize) resolution=blocksize;
-	fprintf(stderr,"Resolution is %i bytes.\n",resolution);
+	fprintf(stdout,"Resolution is %i bytes.\n",resolution);
 	
 	retries=RETRIES;
 	if (arglist_arggiven(carglist,"-R")==0) {
 		retries=arglist_integer(arglist_parameter(carglist,"-R",0));
 	}
 	if (retries<1) retries=1;
-	fprintf(stderr,"Attempting to read damaged data at least %i times.\n",retries);
+	fprintf(stdout,"Attempting to read damaged data at least %i times.\n",retries);
+
+	iblocksize=blocksize;
+	if (arglist_arggiven(carglist,"-i")==0) {
+		iblocksize=arglist_integer(arglist_parameter(carglist,"-i",0));
+	}
+	if (iblocksize<1 || iblocksize>MAXBLOCKSIZE) {
+		fprintf(stderr,"Invalid blocksize given for bad block include file! Aborting!\n");
+		arglist_kill(carglist);
+		return 2;
+	}
+
+	incremental=0;
+	if (arglist_arggiven(carglist,"-I")==0) {
+		incremental=1;
+		bblocksinfile=arglist_parameter(carglist,"-I",0);
+		fprintf(stdout,"Incremental mode, incoming badblocks file: %s with blocksize %i.\n",bblocksinfile,iblocksize);
+	}
+
+	bblocksoutfile=NULL;
+	if (arglist_arggiven(carglist,"-o")==0) {
+		bblocksoutfile=arglist_parameter(carglist,"-o",0);
+		fprintf(stdout,"Writing badblocks file: %s.\n",bblocksoutfile);
+	}
 
 	startoffset=0;
 	if (arglist_arggiven(carglist,"-s")==0) {
 		startoffset=arglist_integer(arglist_parameter(carglist,"-s",0));
 	}
 	if (startoffset<1) startoffset=0;
-	fprintf(stderr,"Starting read at block %i\n",startoffset);
+	fprintf(stdout,"Starting read at block %i.\n",startoffset);
 	
 	length=0;
 	if (arglist_arggiven(carglist,"-l")==0) {
@@ -131,34 +259,78 @@ int main(int argc, char ** argv) {
 	}
 	if (length<1) length=-1;
 	if (length>=0) {
-		fprintf(stderr,"Copying ends after %i blocks read\n",length);
+		fprintf(stdout,"Limiting size to %i blocks.\n",length);
 	}
 	startoffset=startoffset*blocksize;
 	length=length*blocksize;
+	if (filesize==0 && length>0) {
+		filesize=startoffset+length;
+	}
 
 	databuffer=(char*)malloc((blocksize+1024)*sizeof(char));
 	if (databuffer==NULL) {
 		fprintf(stderr,"MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER!\nBAILING!\n");
+		perror("Reason");
 		return 2;
 	}
 		
 	//open files
 	fprintf(stdout,"Trying to safe copy from %s to %s ... \n",sourcefile,destfile);
-	source=open(sourcefile,O_RDONLY );
+	source=open(sourcefile,O_RDONLY | O_NONBLOCK );
 	if (source==-1) {
 		fprintf(stderr,"Error opening sourcefile: %s \n",sourcefile);
+		perror("Reason");
 		usage(argv[0]);
 		arglist_kill(carglist);
 		return 2;
 	}
-	destination=open(destfile,O_WRONLY | O_TRUNC | O_CREAT,0666 );
-	if (destination==-1) {
-		close(source);
-		fprintf(stderr,"Error opening destination: %s \n",destfile);
-		usage(argv[0]);
-		arglist_kill(carglist);
-		return 2;
+	if (incremental==1) {
+		bblocksin=fopen(bblocksinfile,"r");
+		if (bblocksin==NULL) {
+			close(source);
+			fprintf(stderr,"Error opening badblock file for reading: %s \n",bblocksinfile);
+			perror("Reason");
+			arglist_kill(carglist);
+			return 2;
+		}
+		destination=open(destfile,O_WRONLY,0666 );
+		if (destination==-1) {
+			close(source);
+			fclose(bblocksin);
+			fprintf(stderr,"Error opening destination: %s \n",destfile);
+			perror("Reason");
+			usage(argv[0]);
+			arglist_kill(carglist);
+			return 2;
+		}
+	} else {
+		destination=open(destfile,O_WRONLY | O_TRUNC | O_CREAT,0666 );
+		if (destination==-1) {
+			close(source);
+			fprintf(stderr,"Error opening destination: %s \n",destfile);
+			perror("Reason");
+			usage(argv[0]);
+			arglist_kill(carglist);
+			return 2;
+		}
 	}
+	if (bblocksoutfile!=NULL) {
+		bblocksout=open(bblocksoutfile,O_WRONLY | O_TRUNC | O_CREAT,0666);
+		if (bblocksout==-1) {
+			close(source);
+			close(destination);
+			if (incremental==1) {
+				fclose(bblocksin);
+			}
+			fprintf(stderr,"Error opening badblock file for writing: %s \n",bblocksoutfile);
+			perror("Reason");
+			arglist_kill(carglist);
+			return 2;
+		}
+	}
+
+	// setting signal handler
+	signal(SIGINT, signalhandler);
 
 	// start at file start
 	readposition=0;
@@ -173,22 +345,102 @@ int main(int argc, char ** argv) {
 	newsofterror=0;
 	lasterror=0;
 	lastgood=0;
+	lastbadblock=-1;
+	lastsourceblock=-1;
+	damagesize=0;
+	backtracemode=0;
+	percent=-1;
+	oldpercent=-1;
+	oldelapsed=0;
+	oldcategory=timecategory(oldelapsed);
+	elapsed=0;
+	output=0;
+	linewidth=0;
 	
-	while (block!=0 && (readposition<length || length<0)) {
+	while (!wantabort && block!=0 && (readposition<length || length<0)) {
+
+		// start with a whole new block if we finnished the old
+		if (remain==0) {
+			remain=blocksize;
+			if (incremental) {
+				// input file, check wether the current block is in the badblocks list, 
+				// if so, (and no read error condition) proceed as usual,
+				// otherwise seek to the next badblock in input
+				tmp_pos=(readposition+startoffset)/iblocksize;
+				if (tmp_pos>lastsourceblock && newerror>0) {
+					tmp=NULL;
+					do {
+						tmp=fgets(textbuffer,32,bblocksin);
+						if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
+					} while (tmp!=NULL && lastsourceblock<tmp_pos );
+					if (tmp==NULL) {
+						// no more bad blocks in input file
+						break;
+					}
+					readposition=(lastsourceblock*iblocksize)-startoffset;
+				}
+			}
+		}
+
 		// write where we read
 		writeposition=readposition;
-
-		// and start with a hole new block if we finnished the old
-		if (remain==0) remain=blocksize;
+		if (filesize>0) {
+			percent=(100*(readposition+startoffset))/filesize;
+		}
 
 		// calculate how much is left to copy
 		if (readposition+remain>length && length>=0) {
 			remain=length-readposition;
 		}
 
+
 		// seek and read
+		gettimeofday(&oldtime,NULL);
 		lseek(source,readposition+startoffset,SEEK_SET);
+		// select for reading. Have a fallback output in case of timeout so we can react to ctrl+c
+		do {
+			newtime.tv_sec=10;
+			newtime.tv_usec=0;
+			FD_ZERO(&rfds);
+			FD_ZERO(&efds);
+			FD_SET(source,&rfds);
+			FD_SET(source,&efds);
+			select(source+1,&rfds,NULL,&efds,&newtime);
+			if (! ( FD_ISSET(source,&rfds))) {
+				if (filesize) {
+					printpercentage(percent);
+				}
+				printtimecategory(VERY_VERY_SLOW);
+			}
+			if (wantabort) break;
+		} while (! ( FD_ISSET(source,&rfds) || FD_ISSET(source,&efds)));
+		if (wantabort) break;
 		block=read(source,databuffer,remain);
+		gettimeofday(&newtime,NULL);
+		elapsed=timediff(oldtime,newtime);
+		if (timecategory(elapsed)>timecategory(oldelapsed)) {
+			oldelapsed=(((9*oldelapsed)+elapsed)/10);
+		} else if (timecategory(elapsed)<timecategory(oldelapsed)) {
+			oldelapsed=(((99*oldelapsed)+elapsed)/100);
+		}
+		if (filesize && ( percent!=oldpercent || output)) {
+			printpercentage(percent);
+			printtimecategory(timecategory(oldelapsed));
+			oldpercent=percent;
+		}
+		if (timecategory(oldelapsed)!=oldcategory) {
+			if (filesize) printpercentage(percent);
+			printtimecategory(timecategory(oldelapsed));
+			oldcategory=timecategory(oldelapsed);
+		} else if (output) {
+			if (filesize) printpercentage(percent);
+			printtimecategory(timecategory(oldelapsed));
+		}
+		if (linewidth>40) {
+			write(2,&"\n",1);
+			linewidth=0;
+		}
+		output=0;
 
 		if (block>0) {
 			// successfull read, if happening during soft recovery
@@ -205,24 +457,36 @@ int main(int argc, char ** argv) {
 				if (remain>resolution) {
 				 	remain=remain/2;
 					readposition-=remain;
-					write(0,&"<",1);
+					write(1,&"<",1);
+					output=1;
+					linewidth++;
+					backtracemode=1;
 				} else {
 					newerror=retries;
 					remain=0;
 					tmp_pos=readposition/blocksize;
 					tmp_bytes=readposition-lastgood;
-					sprintf(databuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
-					write(0,databuffer,strlen(databuffer));
+					damagesize+=tmp_bytes;
+					sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
+					write(1,textbuffer,strlen(textbuffer));
+					write(2,&"\n",1);
+					output=1;
+					linewidth=0;
+					backtracemode=0;
 					lasterror=readposition;
 				}
 				
 			} else {
 				if (block<remain) {
 					// not all data we wanted got read, note that
-					write(0,&"_",1);
+					write(1,&"_",1);
+					output=1;
+					linewidth++;
 					counter=1;
 				} else if (--counter<=0) {
-					write(0,&".",1);
+					write(1,&".",1);
+					output=1;
+					linewidth++;
 					counter=1024;
 				}
 
@@ -236,8 +500,15 @@ int main(int argc, char ** argv) {
 					writeblock=write(destination,databuffer+writeoffset,writeremain);
 					if (writeblock<=0) {
 						fprintf(stderr,"\nWRITING TO %s FAILED, BAILING!\n",destfile);
+						perror("Reason");
 						close(destination);
 						close(source);
+						if (incremental==1) {
+							fclose(bblocksin);
+						}
+						if (bblocksoutfile!=NULL) {
+							close(bblocksout);
+						}
 						arglist_kill(carglist);
 						return 2;
 					}
@@ -254,13 +525,17 @@ int main(int argc, char ** argv) {
 				// case we can read partial data from the beginning
 				newsofterror=1;
 				remain=remain/2;
-				write(0,&">",1);
+				write(1,&">",1);
+				linewidth++;
+				output=1;
 			} else {
 				if (newerror>1) {
 					// if we are at minimal size, attempt a couple of retries
 					newsofterror=1;
 					newerror--;
-					write(0,&"!",1);
+					write(1,&"!",1);
+					linewidth++;
+					output=1;
 				} else {
 					// readsize is already minimal, out of retry attempts
 					// unrecoverable error, go one sector ahead and try again there 
@@ -272,18 +547,34 @@ int main(int argc, char ** argv) {
 						newerror=0;
 						tmp_pos=readposition/blocksize;
 						tmp_bytes=readposition-lasterror;
-						sprintf(databuffer,"[%llu](+%llu){",tmp_pos,tmp_bytes);
-						write(0,databuffer,strlen(databuffer));
+						sprintf(textbuffer,"[%llu](+%llu){",tmp_pos,tmp_bytes);
+						write(1,textbuffer,strlen(textbuffer));
+						output=1;
+						linewidth+=strlen(textbuffer);
 						// and we set the read size high enough to go over the damaged area quickly
 						remain=blocksize;
 						lastgood=readposition;
 					} 
 
-					harderr++;
+					if (!backtracemode) {
+						harderr++;
+						write(1,&"X",1);
+						output=1;
+						linewidth++;
+						if (bblocksoutfile!=NULL) {
+							// write badblocks to file if requested
+							tmp_pos=((readposition+startoffset)/blocksize);
+							if (tmp_pos>lastbadblock) {
+								lastbadblock=tmp_pos;
+								sprintf(textbuffer,"%llu\n",lastbadblock);
+								write(bblocksout,textbuffer,strlen(textbuffer));
+							}
+							
+						}
+					}
+
 					readposition+=remain;
 
-
-					write(0,&"X",1);
 				}
 
 			}
@@ -293,22 +584,52 @@ int main(int argc, char ** argv) {
 			source=open(sourcefile,O_RDONLY );
 			if (source==-1) {
 				fprintf(stderr,"\nError on reopening sourcefile during error recovery - copy failed!\n");
+				perror("Reason");
 				close(destination);
+				if (incremental==1) {
+					fclose(bblocksin);
+				}
+				if (bblocksoutfile!=NULL) {
+					close(bblocksout);
+				}
 				arglist_kill(carglist);
 				return 2;
 			}
 		}
 	}
+	if (newerror==0) {
+		// if theres an error at the end of input, treat as if we had one succesfull read afterwards
+		tmp_pos=readposition/blocksize;
+		tmp_bytes=readposition-lastgood;
+		damagesize+=tmp_bytes;
+		sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
+		write(1,textbuffer,strlen(textbuffer));
+		write(2,&"\n",1);
+	}
 	fprintf(stdout,"\nCopying done ");
 	if (harderr==0) {
-		fprintf(stdout,"successfully :)\n");
+		if (wantabort) {
+			fprintf(stdout,"after CTRL-C, no errors.\n");
+		} else {
+			fprintf(stdout,"successfully :)\n");
+		}
 	} else {
-		fprintf(stdout,"with skipped parts !\n");
+		if (wantabort) {
+			fprintf(stdout,"after CTRL-C, ");
+		}
+		fprintf(stdout,"with errors !\n");
 	}
 	fprintf(stdout,"%llu recoverable and %llu non recoverable errors occured.\n",softerr,harderr);
-	fprintf(stdout,"%llu bytes (%llu blocks) read/written\n",readposition,readposition/blocksize);
+	fprintf(stdout,"%llu bytes (%llu blocks) read/written.\n",readposition,readposition/blocksize);
+	fprintf(stdout,"%llu bytes in %llu blocks were unrecoverable.\n",damagesize,harderr);
 
 	close(destination);
 	close(source);
+	if (incremental==1) {
+		fclose(bblocksin);
+	}
+	if (bblocksoutfile!=NULL) {
+		close(bblocksout);
+	}
 	arglist_kill(carglist);
 }
