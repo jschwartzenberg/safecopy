@@ -476,8 +476,7 @@ int main(int argc, char ** argv) {
 	}
 	
 	// main data loop. Continue until all data has been read or CTRL+C has been pressed
-	//while (!wantabort && block!=0 && (readposition<length || length<0)) {
-	while (!wantabort && (readposition<length || length<0)) {
+	while (!wantabort && block!=0 && (readposition<length || length<0)) {
 
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
