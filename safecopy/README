@@ -21,76 +21,86 @@ without device dependent tricks.
 This is achieved by multiple reads from smaller sections at
 the begin of every IO error causing (i.e. damaged) area,
 skipping that area while padding the destination file with zeroes,
-and then finding and continuing at where readable data again starts.
+and continuing where readable data starts again,
+using a similar algorithm to find the true end of the damaged area.
 
-For this to work, the source device or file has to be seekable,
-so with some tape devices and alike it would probably not work.
+For this to work, the source device or file has to be seekable.
+For unseekable devices (like tapes) you can use an external script
+to execute a controlled skip over the damaged part for you.
+(For example by using "mt seek" and "mt tell" on an SCSI tape device)
+See the "-S <seekscript>" parameter for details.
 
 Performance and success of this tool depend extremely
-on the device driver and hardware.
+on the device driver, firmware and underlying hardware.
 
-Usually the kernel and driver itself try to soft-recover from internal IO
-errors, giving back partial data and trying to read the sectors multiple
-times, resetting the drives, turning DMA off, etc.
+Some DVD drives are known to cause the ATAPI bus to crash on errors,
+causing the device driver to freeze for times up to and beyond.
 
-However if the sectors are really unrecoverable you get said error
-anyway sooner or later and if it took half an hour this is not good for
-safecopies recovery performance.
-
-For example a test CD I tried to read an ISO image from
-which incidentally had many purposely damaged sectors
-an ATAPI cdrom writer running with the SCSI emulation driver
-under linux took about 1.5 seconds to recover from a
-failed read attempt, reopening and reseeking, which allowed to
-extract the ISO image in reasonable time.
-
-The same CD in a DVD ROM drive running with the standard ATAPI driver
-on the IDE bus crashed and needed over 5 minutes to recover from
-the first attempt to read from any damaged sector.
-With firmware and driver behaving like this it would take weeks
-to read the CD with this tool.
+Some drives can read bad media better than others. Be sure to attempt data recovery of CDs and DVDs on several different drives and computers.
+You can use safecopys incremental recovery feature to read previously unreadable sectors.
 
 Usage: safecopy [options] <source> <target>
 Options:
-        -b <bytes> : Blocksize in bytes, also used as skipping offset
-                     when searching for the end of a bad area.
-                     Set this to the physical sectorsize of your media.
-                     Default: 512
-        -r <bytes> : Resolution in bytes when searching for the exact
-                     beginning or end of a bad area.
-                     Smaller values lead to very thorough attempts to read
-                     data at the edge of damaged areas,
-                     but increase the strain on the damaged media.
-                     Default: 4
-        -R <number> : At least that many read attempts are made on the first
-                      bad block of a damaged area with minimum resolution.
-                      Higher values can sometimes recover a weak sector,
-                      but at the cost of additional strain.
-                      Default: 2
-        -s <blocks> : Start position where to start reading.
-                      Will correspond to position 0 in the destination file.
-                      Default: block 0
-        -l <blocks> : Maximum length of data to be read.
-                      Default: Entire size of input file
-        -h | --help : Show this text
+	-b <bytes> : Blocksize in bytes, also used as skipping offset
+	             when searching for the end of a bad area.
+	             Set this to the physical sectorsize of your media.
+	             Default: Blocksize of input device, if determinable,
+	                      otherwise 512
+	-r <bytes> : Resolution in bytes when searching for the exact
+	             beginning or end of a bad area.
+	             Smaller values lead to very thorough attempts to read
+	             data at the edge of damaged areas,
+	             but increase the strain on the damaged media.
+	             Default: 4
+	-R <number> : At least that many read attempts are made on the first
+	              bad block of a damaged area with minimum resolution.
+	              Higher values can sometimes recover a weak sector,
+	              but at the cost of additional strain.
+	              Default: 2
+	-s <blocks> : Start position where to start reading.
+	              Will correspond to position 0 in the destination file.
+	              Default: block 0
+	-l <blocks> : Maximum length of data to be read.
+	              Default: Entire size of input file
+	-I <badblockfile> : Incremental mode. Assume the target file already
+	                    exists and has holes specified in a badblockfile.
+	                    It will be attempted to retrieve more data from
+	                    the missing areas only.
+	                    Default: none
+	-i <bytes> : Blocksize to interprete the badblockfile given with -I.
+	             Default: Blocksize as specified by -b
+	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.
+	                    Default: none
+	-S <seekscript> : Use external script for seeking in input file.
+	                  (Might be usefull for tape devices and similar).
+	                  Seekscript must be an executable that takes the
+	                  number of blocks to be skipped as argv1 (1-64)
+	                  the blocksize in bytes as argv2
+	                  and the current position (in bytes) as argv3.
+	                  Return value needs to be the number of blocks
+	                  succesfully skipped, or 0 to indicate seek failure.
+	                  The external seekscript will only be used
+	                  if lseek() fails and we need to skip over data.
+	                  Default: none
+	-h | --help : Show this text
 
 Description of output:
-        . : Between 1 and 1024 blocks successfully read.
-        _ : Read of block was incomplete. (possibly end of file)
-            The blocksize is now reduced to read the rest.
-        > : Read failed, reducing blocksize to read partial data.
-        ! : A low level error on read attempt of smallest allowed size
-            leads to a retry attempt.
-        [xx](+yy){ : Current block and number of bytes continuously
-                     read successfully up to this point.
-        X : Read failed on a block with minimum blocksize and is skipped.
-            Unrecoverable error, destination file is padded with zeros.
-            Data is now skipped until end of the unreadable area is reached.
-        < : Successful read after the end of a bad area causes
-            backtracking with smaller blocksizes to search for the first
-            readable data.
-        }[xx](+yy) : current block and number of bytes of recent
-                     continuous unreadable data.
+	. : Between 1 and 1024 blocks successfully read.
+	_ : Read of block was incomplete. (possibly end of file)
+	    The blocksize is now reduced to read the rest.
+	> : Read failed, reducing blocksize to read partial data.
+	! : A low level error on read attempt of smallest allowed size
+	    leads to a retry attempt.
+	[xx](+yy){ : Current block and number of bytes continuously
+	             read successfully up to this point.
+	X : Read failed on a block with minimum blocksize and is skipped.
+	    Unrecoverable error, destination file is padded with zeros.
+	    Data is now skipped until end of the unreadable area is reached.
+	< : Successful read after the end of a bad area causes
+	    backtracking with smaller blocksizes to search for the first
+	    readable data.
+	}[xx](+yy) : current block and number of bytes of recent
+	             continuous unreadable data.
 
 Copyright 2009, distributed under terms of the GPL
 

@@ -66,7 +66,7 @@ void usage(char * name) {
 	fprintf(stderr,"	-S <seekscript> : Use external script for seeking in input file.\n");
 	fprintf(stderr,"	                  (Might be usefull for tape devices and similar).\n");
 	fprintf(stderr,"	                  Seekscript must be an executable that takes the\n");
-	fprintf(stderr,"	                  number of blocks that should be skipped as argv1 (1-64)\n");
+	fprintf(stderr,"	                  number of blocks to be skipped as argv1 (1-64)\n");
 	fprintf(stderr,"	                  the blocksize in bytes as argv2\n");
 	fprintf(stderr,"	                  and the current position (in bytes) as argv3.\n");
 	fprintf(stderr,"	                  Return value needs to be the number of blocks\n");
