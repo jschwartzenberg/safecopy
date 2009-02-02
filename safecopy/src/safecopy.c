@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -480,17 +481,16 @@ int main(int argc, char ** argv) {
 
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
-			remain=blocksize;
 			if (incremental) {
 				// Incremental mode. Skip over unnecessary areas.
 				// check wether the current block is in the badblocks list, 
 				// if so, (and no read error condition) proceed as usual,
 				// otherwise seek to the next badblock in input
-				tmp_pos=(readposition+startoffset)/iblocksize;
+				tmp_pos=(sposition)/iblocksize;
 				if (tmp_pos>lastsourceblock && newerror>0) {
 					tmp=NULL;
 					do {
-						tmp=fgets(textbuffer,32,bblocksin);
+						tmp=fgets(textbuffer,64,bblocksin);
 						if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
 					} while (tmp!=NULL && lastsourceblock<tmp_pos );
 					if (tmp==NULL) {
@@ -500,6 +500,8 @@ int main(int argc, char ** argv) {
 					readposition=(lastsourceblock*iblocksize)-startoffset;
 				}
 			}
+			remain=((((readposition/blocksize)+1)*blocksize)-readposition);
+			// make sure any misalignment to block boundaries get corrected asap
 		}
 
 		// seek and read - timed
@@ -511,35 +513,41 @@ int main(int argc, char ** argv) {
 				sposition=cposition;
 				seekable=1;
 			} else {
-				// input file is not seekable!
-				seekable=0;
-				if (readposition+startoffset>sposition) {
-					// emergency seek will only handle positive seeks
-					// close input file for seek/skip
-					close (source);
-					cposition=emergency_seek(startoffset+readposition,sposition,blocksize,seekscriptfile);
-					if (cposition<0 && newerror==0) {
-						// bail if we cannot skip over hard errors!
-						fprintf(stderr,"\nError! Non-recoverable error in non-seeekable input!\nPlease provide external seek script to skip over bad parts!\n");
-						break;
-					}
-					// reopen input file
-					source=open(sourcefile,O_RDONLY );
-					if (source==-1) {
-						fprintf(stderr,"\nError on reopening sourcefile after external seek - copy failed!\n");
-						perror("Reason");
-						close(destination);
-						if (incremental==1) {
-							fclose(bblocksin);
+				// seek failed, check why
+				if (errno==EINVAL && seekable==1 && newerror==0) {
+					// tried to seek past the end of file during skipping of erroneous area
+					break;
+				} else {
+					// input file is not seekable!
+					seekable=0;
+					if (readposition+startoffset>sposition) {
+						// emergency seek will only handle positive seeks
+						// close input file for seek/skip
+						close (source);
+						cposition=emergency_seek(startoffset+readposition,sposition,blocksize,seekscriptfile);
+						if (cposition<0 && newerror==0) {
+							// bail if we cannot skip over hard errors!
+							perror("\nError! Non-recoverable error in non-seekable input");
+							break;
 						}
-						if (bblocksoutfile!=NULL) {
-							close(bblocksout);
+						// reopen input file
+						source=open(sourcefile,O_RDONLY );
+						if (source==-1) {
+							fprintf(stderr,"\nError on reopening sourcefile after external seek - copy failed!\n");
+							perror("Reason");
+							close(destination);
+							if (incremental==1) {
+								fclose(bblocksin);
+							}
+							if (bblocksoutfile!=NULL) {
+								close(bblocksout);
+							}
+							arglist_kill(carglist);
+							return 2;
 						}
-						arglist_kill(carglist);
-						return 2;
-					}
-					if (cposition>=0) {
-						sposition=cposition;
+						if (cposition>=0) {
+							sposition=cposition;
+						}
 					}
 				}
 			}
@@ -616,7 +624,7 @@ int main(int argc, char ** argv) {
 		output=0;
 
 		if (block>0) {
-			sposition=sposition+block;	
+			sposition=sposition+block;
 			// successfull read, if happening during soft recovery
 			// (downscale or retry) list a single soft error
 			if (newsofterror==1) {
@@ -751,7 +759,8 @@ int main(int argc, char ** argv) {
 						output=1;
 						linewidth+=strlen(textbuffer);
 						// and we set the read size high enough to go over the damaged area quickly
-						remain=blocksize;
+						// (next block boundary)
+						remain=((((readposition/blocksize)+1)*blocksize)-readposition);
 						lastgood=readposition;
 					} 
 
@@ -772,7 +781,9 @@ int main(int argc, char ** argv) {
 						}
 					}
 
+					// skip ahead(virtually)
 					readposition+=remain;
+					remain=0;
 
 				}
 
@@ -793,6 +804,11 @@ int main(int argc, char ** argv) {
 				}
 				arglist_kill(carglist);
 				return 2;
+			}
+			if (seekable) {
+				// in seekable input, a re-opening sets the pointer to zero
+				// we must reflect that.
+				sposition=0;
 			}
 		}
 	}
@@ -819,7 +835,7 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"with errors !\n");
 	}
 	fprintf(stdout,"%llu recoverable and %llu non recoverable errors occured.\n",softerr,harderr);
-	fprintf(stdout,"%llu bytes (%llu blocks) read/written.\n",readposition,readposition/blocksize);
+	fprintf(stdout,"%llu bytes (%llu blocks) copied.\n",(readposition-startoffset),(readposition-startoffset)/blocksize);
 	fprintf(stdout,"%llu bytes in %llu blocks were unrecoverable.\n",damagesize,harderr);
 
 	close(destination);
