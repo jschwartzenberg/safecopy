@@ -2,6 +2,7 @@
 // make off_t a 64 bit pointer on system that support it
 
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <fcntl.h>
@@ -62,6 +63,17 @@ void usage(char * name) {
 	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
 	fprintf(stderr,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
 	fprintf(stderr,"	                    Default: none\n");
+	fprintf(stderr,"	-S <seekscript> : Use external script for seeking in input file.\n");
+	fprintf(stderr,"	                  (Might be usefull for tape devices and similar).\n");
+	fprintf(stderr,"	                  Seekscript must be an executable that takes the\n");
+	fprintf(stderr,"	                  number of blocks that should be skipped as argv1 (1-64)\n");
+	fprintf(stderr,"	                  the blocksize in bytes as argv2\n");
+	fprintf(stderr,"	                  and the current position (in bytes) as argv3.\n");
+	fprintf(stderr,"	                  Return value needs to be the number of blocks\n");
+	fprintf(stderr,"	                  succesfully skipped, or 0 to indicate seek failure.\n");
+	fprintf(stderr,"	                  The external seekscript will only be used\n");
+	fprintf(stderr,"	                  if lseek() fails and we need to skip over data.\n");
+	fprintf(stderr,"	                  Default: none\n");
 	fprintf(stderr,"	-h | --help : Show this text\n\n");
 	fprintf(stderr,"Description of output:\n");
 	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
@@ -83,18 +95,20 @@ void usage(char * name) {
 	fprintf(stderr,"Copyright 2009, distributed under terms of the GPL\n\n");
 }
 
-
-void printpercentage(unsigned int percent) {
+// print percentage to stderr
+void printpercentage(int percent) {
 	char percentage[16]="100%";
 	int t=0;
 	if (percent>100) percent=100;
-	sprintf(percentage,"      %u%%",percent);
+	if (percent<0) percent=0;
+	sprintf(percentage,"      %i%%",percent);
 	write(2,percentage,strlen(percentage));
 	while (percentage[t++]!='\x0') {
 		write(2,&"\b",1);
 	}
 }
 
+// calculate difference in usecs between two struct timevals
 long int timediff(struct timeval oldtime,struct timeval newtime) {
 
 	long int usecs=newtime.tv_usec-oldtime.tv_usec;
@@ -103,6 +117,7 @@ long int timediff(struct timeval oldtime,struct timeval newtime) {
 
 }
 
+// map delays to quality categories
 int timecategory (long int time) {
 	if (time<=VERY_FAST) return VERY_FAST;
 	if (time<=FAST) return FAST;
@@ -111,6 +126,7 @@ int timecategory (long int time) {
 	return VERY_VERY_SLOW;
 }
 
+// map quality categories to icons
 char* timeicon(int timecat) {
 	switch (timecat) {
 		case VERY_VERY_SLOW: return VERY_VERY_SLOW_ICON;
@@ -122,6 +138,7 @@ char* timeicon(int timecat) {
 	return "  ???";
 }
 
+// print quality indicator to stderr
 void printtimecategory(int timecat) {
 	char * icon=timeicon(timecat);
 	int t=0;
@@ -131,36 +148,95 @@ void printtimecategory(int timecat) {
 	}
 }
 
+// global flag variable and handler for CTRL+C
 int wantabort=0;
-
 void signalhandler(int sig) {
 	wantabort=1;
 }
 
+// wrapper for external script to seek in character device files (tapes)
+off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
+	char firstarg[128];
+	char secondarg[128];
+	char thirdarg[128];
+	off_t delta=new-old;
+	int status;
+	// do nothing if no seek is necessary
+	if (new==old) return old;
+	// do nothing if no script is given
+	if (script==NULL) return(-2);
+	// because of the limited size of EXITSTATUS,
+	// we need to call separate seeks for big skips
+	while (delta>(blocksize*64)) {
+		old=emergency_seek(old+(blocksize*64),old,blocksize,script);
+		if (old<0) return old;
+		delta=new-old;
+	}
+	// minimum seek is one block
+	if (delta<blocksize) delta=blocksize;
+	// call a script
+	sprintf(firstarg,"%llu",(delta/blocksize));
+	sprintf(secondarg,"%llu",blocksize);
+	sprintf(thirdarg,"%llu",old);
+	pid_t child=fork();
+	if (child==0) {
+		execlp(script,script,firstarg,secondarg,NULL);
+		exit (-2);
+	} else if( child<0) {
+		return(-2);
+	}
+	waitpid(child,&status,0);
+	// return exit code - calculate bytes from blocks in case of positive exit value
+	if (WEXITSTATUS(status)<0) return (WEXITSTATUS(status));
+	return (old+(blocksize*WEXITSTATUS(status)));
+}
+
+// main
 int main(int argc, char ** argv) {
 
+	// commandline argument handler class
 	struct arglist *carglist;
-	char *sourcefile,*destfile,*bblocksinfile,*bblocksoutfile;
+	// filenames
+	char *sourcefile,*destfile,*bblocksinfile,*bblocksoutfile,*seekscriptfile;
+	// file descriptors
 	int source,destination,bblocksout;
+	// high level file descriptor
 	FILE *bblocksin;
-	off_t readposition,writeposition;
+
+	// file offset variables
+	off_t readposition,cposition,sposition,writeposition;
 	off_t startoffset,length,writeoffset;
+	// variables for handling read/written sizes/remainders
 	ssize_t remain,block,writeblock,writeremain;
+	// pointer to main IO data buffer
 	char * databuffer;
+	// a buffer for output text
 	char textbuffer[256];
+	// buffer pointer for sfgets() 
 	char *tmp;
+	// several local integer variables
 	int blocksize,iblocksize,resolution,retries,incremental;
-	int counter,percent,oldpercent,newerror,newsofterror,backtracemode,output,linewidth;
+	int counter,percent,oldpercent,newerror,newsofterror;
+	int backtracemode,output,linewidth,seekable;
+
+	// error indicators and flags
 	off_t softerr,harderr,lasterror,lastgood;
+	// tmp vars for file offsets
 	off_t tmp_pos,tmp_bytes;
+	// variables to remember beginning and end of previous good/bad area
 	off_t lastbadblock,lastsourceblock;
+	// stat() needs this
 	struct stat filestatus;
+	// input filesize and size of unreadable area
 	off_t filesize,damagesize;
+	// times
 	struct timeval oldtime,newtime;
+	// and timing helper variables
 	long int elapsed,oldelapsed,oldcategory;
+	// select() needs these
 	fd_set rfds,efds;
 
-	// read arguments
+	// parse all commandline arguments
 	carglist=arglist_new(argc,argv);
 	arglist_addarg (carglist,"--help",0);
 	arglist_addarg (carglist,"-h",0);
@@ -172,6 +248,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-o",1);
 	arglist_addarg (carglist,"-I",1);
 	arglist_addarg (carglist,"-i",1);
+	arglist_addarg (carglist,"-S",1);
 
 	
 	if ((arglist_arggiven(carglist,"--help")==0)
@@ -244,6 +321,12 @@ int main(int argc, char ** argv) {
 	if (arglist_arggiven(carglist,"-o")==0) {
 		bblocksoutfile=arglist_parameter(carglist,"-o",0);
 		fprintf(stdout,"Writing badblocks file: %s.\n",bblocksoutfile);
+	}
+
+	seekscriptfile=NULL;
+	if (arglist_arggiven(carglist,"-S")==0) {
+		seekscriptfile=arglist_parameter(carglist,"-S",0);
+		fprintf(stderr,"Using %s for emergency seeking.\n",seekscriptfile);
 	}
 
 	startoffset=0;
@@ -332,7 +415,7 @@ int main(int argc, char ** argv) {
 	// setting signal handler
 	signal(SIGINT, signalhandler);
 
-	// start at file start
+	// initialise all vars
 	readposition=0;
 	writeposition=0;
 	block=-1;
@@ -356,14 +439,48 @@ int main(int argc, char ** argv) {
 	elapsed=0;
 	output=0;
 	linewidth=0;
+	sposition=0;
+	seekable=1;
+
+	// attempt to seek to start position to find out wether source file is seekable
+	cposition=lseek(source,startoffset,SEEK_SET);
+	if (cposition<0) {
+		perror("Warning: Input file is not seekable");
+		seekable=0;
+		close(source);
+		cposition=emergency_seek(startoffset,0,blocksize,seekscriptfile);
+		if (cposition>=0) {
+			sposition=cposition;
+		}
+		source=open(sourcefile,O_RDONLY );
+		if (source==-1) {
+			fprintf(stderr,"\nError on reopening sourcefile during error recovery - copy failed!\n");
+			perror("Reason");
+			close(destination);
+			if (incremental==1) {
+				fclose(bblocksin);
+			}
+			if (bblocksoutfile!=NULL) {
+				close(bblocksout);
+			}
+			arglist_kill(carglist);
+			return 2;
+		}
+	} else {
+		sposition=cposition;
+		seekable=1;
+	}
 	
-	while (!wantabort && block!=0 && (readposition<length || length<0)) {
+	// main data loop. Continue until all data has been read or CTRL+C has been pressed
+	//while (!wantabort && block!=0 && (readposition<length || length<0)) {
+	while (!wantabort && (readposition<length || length<0)) {
 
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
 			remain=blocksize;
 			if (incremental) {
-				// input file, check wether the current block is in the badblocks list, 
+				// Incremental mode. Skip over unnecessary areas.
+				// check wether the current block is in the badblocks list, 
 				// if so, (and no read error condition) proceed as usual,
 				// otherwise seek to the next badblock in input
 				tmp_pos=(readposition+startoffset)/iblocksize;
@@ -382,10 +499,57 @@ int main(int argc, char ** argv) {
 			}
 		}
 
-		// write where we read
+		// seek and read - timed
+		gettimeofday(&oldtime,NULL);
+		// seek only if the current file position differs from requested file position
+		if (sposition!=readposition+startoffset) {
+			cposition=lseek(source,readposition+startoffset,SEEK_SET);
+			if (cposition>0) {
+				sposition=cposition;
+				seekable=1;
+			} else {
+				// input file is not seekable!
+				seekable=0;
+				if (readposition+startoffset>sposition) {
+					// emergency seek will only handle positive seeks
+					// close input file for seek/skip
+					close (source);
+					cposition=emergency_seek(startoffset+readposition,sposition,blocksize,seekscriptfile);
+					if (cposition<0 && newerror==0) {
+						// bail if we cannot skip over hard errors!
+						fprintf(stderr,"\nError! Non-recoverable error in non-seeekable input!\nPlease provide external seek script to skip over bad parts!\n");
+						break;
+					}
+					// reopen input file
+					source=open(sourcefile,O_RDONLY );
+					if (source==-1) {
+						fprintf(stderr,"\nError on reopening sourcefile after external seek - copy failed!\n");
+						perror("Reason");
+						close(destination);
+						if (incremental==1) {
+							fclose(bblocksin);
+						}
+						if (bblocksoutfile!=NULL) {
+							close(bblocksout);
+						}
+						arglist_kill(carglist);
+						return 2;
+					}
+					if (cposition>=0) {
+						sposition=cposition;
+					}
+				}
+			}
+		}
+		// prevent negative write offsets, otherwise write where we read
+		if (sposition>startoffset) {
+			readposition=sposition-startoffset;
+		} else {
+			readposition=0;
+		}
 		writeposition=readposition;
-		if (filesize>0) {
-			percent=(100*(readposition+startoffset))/filesize;
+		if (filesize>startoffset) {
+			percent=(100*(readposition))/(filesize-startoffset);
 		}
 
 		// calculate how much is left to copy
@@ -393,11 +557,7 @@ int main(int argc, char ** argv) {
 			remain=length-readposition;
 		}
 
-
-		// seek and read
-		gettimeofday(&oldtime,NULL);
-		lseek(source,readposition+startoffset,SEEK_SET);
-		// select for reading. Have a fallback output in case of timeout so we can react to ctrl+c
+		// select for reading. Have a fallback output in case of timeout.
 		do {
 			newtime.tv_sec=10;
 			newtime.tv_usec=0;
@@ -415,27 +575,35 @@ int main(int argc, char ** argv) {
 			if (wantabort) break;
 		} while (! ( FD_ISSET(source,&rfds) || FD_ISSET(source,&efds)));
 		if (wantabort) break;
+		// read input data
 		block=read(source,databuffer,remain);
+		// time reading for quality calculation
 		gettimeofday(&newtime,NULL);
 		elapsed=timediff(oldtime,newtime);
+
+		// smooth times, react sensitive to high times
 		if (timecategory(elapsed)>timecategory(oldelapsed)) {
 			oldelapsed=(((9*oldelapsed)+elapsed)/10);
 		} else if (timecategory(elapsed)<timecategory(oldelapsed)) {
 			oldelapsed=(((99*oldelapsed)+elapsed)/100);
 		}
+		// update percentage if changed
 		if (filesize && ( percent!=oldpercent || output)) {
 			printpercentage(percent);
 			printtimecategory(timecategory(oldelapsed));
 			oldpercent=percent;
 		}
+		// update quality if changed
 		if (timecategory(oldelapsed)!=oldcategory) {
 			if (filesize) printpercentage(percent);
 			printtimecategory(timecategory(oldelapsed));
 			oldcategory=timecategory(oldelapsed);
 		} else if (output) {
+			// or if any output has taken place
 			if (filesize) printpercentage(percent);
 			printtimecategory(timecategory(oldelapsed));
 		}
+		// break lines after 40 chars to prevent backspace bug of terminals
 		if (linewidth>40) {
 			write(2,&"\n",1);
 			linewidth=0;
@@ -443,6 +611,7 @@ int main(int argc, char ** argv) {
 		output=0;
 
 		if (block>0) {
+			sposition=sposition+block;	
 			// successfull read, if happening during soft recovery
 			// (downscale or retry) list a single soft error
 			if (newsofterror==1) {
@@ -452,9 +621,9 @@ int main(int argc, char ** argv) {
 			// read successfull, test for end of damaged area
 			if (newerror==0) {
 				// we are in recovery since we just read past the end of a damaged area
-				// so we go back until the beginning of the readable area is found
+				// so we go back until the beginning of the readable area is found (if possible)
 
-				if (remain>resolution) {
+				if (remain>resolution && seekable) {
 				 	remain=remain/2;
 					readposition-=remain;
 					write(1,&"<",1);
@@ -494,9 +663,34 @@ int main(int argc, char ** argv) {
 				readposition+=block;
 				writeremain=block;
 				writeoffset=0;
-
+				if (sposition<startoffset) {
+					// handle cases where unwanted data has been read doe to seek error
+					if ((sposition+block)<=startoffset) {
+						// we read data we are supposed to skip! Ignore.
+						writeremain=0;
+					} else {
+						// partial skip
+						writeremain=(sposition+block)-startoffset;
+						writeoffset=startoffset-sposition;
+					}
+				}
 				while (writeremain>0) {
-					lseek(destination,writeposition,SEEK_SET);
+					// write data to destination file
+					cposition=lseek(destination,writeposition,SEEK_SET);
+					if (cposition<0) {
+						fprintf(stderr,"\nSEEK IN %s FAILED\n",destfile);
+						perror("Reason");
+						close(destination);
+						close(source);
+						if (incremental==1) {
+							fclose(bblocksin);
+						}
+						if (bblocksoutfile!=NULL) {
+							close(bblocksout);
+						}
+						arglist_kill(carglist);
+						return 2;
+					}
 					writeblock=write(destination,databuffer+writeoffset,writeremain);
 					if (writeblock<=0) {
 						fprintf(stderr,"\nWRITING TO %s FAILED, BAILING!\n",destfile);
