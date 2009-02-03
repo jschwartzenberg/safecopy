@@ -62,6 +62,12 @@ void usage(char * name) {
 	fprintf(stderr,"	                    Default: none\n");
 	fprintf(stderr,"	-i <bytes> : Blocksize to interprete the badblockfile given with -I.\n");
 	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
+	fprintf(stderr,"	-X <badblockfile> : Exclusion mode. Do not attemp to read blocks in\n");
+	fprintf(stderr,"	                    badblockfile. If used together with -I,\n");
+	fprintf(stderr,"	                    excluded blocks override included blocks.\n");
+	fprintf(stderr,"	                    Default: none\n");
+	fprintf(stderr,"	-x <bytes> : Blocksize to interprete the badblockfile given with -X.\n");
+	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
 	fprintf(stderr,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
 	fprintf(stderr,"	                    Default: none\n");
 	fprintf(stderr,"	-S <seekscript> : Use external script for seeking in input file.\n");
@@ -71,7 +77,7 @@ void usage(char * name) {
 	fprintf(stderr,"	                  the blocksize in bytes as argv2\n");
 	fprintf(stderr,"	                  and the current position (in bytes) as argv3.\n");
 	fprintf(stderr,"	                  Return value needs to be the number of blocks\n");
-	fprintf(stderr,"	                  succesfully skipped, or 0 to indicate seek failure.\n");
+	fprintf(stderr,"	                  successfully skipped, or 0 to indicate seek failure.\n");
 	fprintf(stderr,"	                  The external seekscript will only be used\n");
 	fprintf(stderr,"	                  if lseek() fails and we need to skip over data.\n");
 	fprintf(stderr,"	                  Default: none\n");
@@ -202,11 +208,11 @@ int main(int argc, char ** argv) {
 	// commandline argument handler class
 	struct arglist *carglist;
 	// filenames
-	char *sourcefile,*destfile,*bblocksinfile,*bblocksoutfile,*seekscriptfile;
+	char *sourcefile,*destfile,*bblocksinfile,*xblocksinfile,*bblocksoutfile,*seekscriptfile;
 	// file descriptors
 	int source,destination,bblocksout;
 	// high level file descriptor
-	FILE *bblocksin;
+	FILE *bblocksin,*xblocksin;
 
 	// file offset variables
 	off_t readposition,cposition,sposition,writeposition;
@@ -220,7 +226,8 @@ int main(int argc, char ** argv) {
 	// buffer pointer for sfgets() 
 	char *tmp;
 	// several local integer variables
-	int blocksize,iblocksize,resolution,retries,incremental;
+	int blocksize,iblocksize,xblocksize,resolution,retries;
+	int incremental,excluding;
 	int counter,percent,oldpercent,newerror,newsofterror;
 	int backtracemode,output,linewidth,seekable;
 
@@ -229,7 +236,7 @@ int main(int argc, char ** argv) {
 	// tmp vars for file offsets
 	off_t tmp_pos,tmp_bytes;
 	// variables to remember beginning and end of previous good/bad area
-	off_t lastbadblock,lastsourceblock;
+	off_t lastbadblock,lastxblock,lastsourceblock;
 	// stat() needs this
 	struct stat filestatus;
 	// input filesize and size of unreadable area
@@ -253,6 +260,8 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-o",1);
 	arglist_addarg (carglist,"-I",1);
 	arglist_addarg (carglist,"-i",1);
+	arglist_addarg (carglist,"-X",1);
+	arglist_addarg (carglist,"-x",1);
 	arglist_addarg (carglist,"-S",1);
 
 	
@@ -322,6 +331,23 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"Incremental mode, incoming badblocks file: %s with blocksize %i.\n",bblocksinfile,iblocksize);
 	}
 
+	xblocksize=blocksize;
+	if (arglist_arggiven(carglist,"-x")==0) {
+		xblocksize=arglist_integer(arglist_parameter(carglist,"-x",0));
+	}
+	if (xblocksize<1 || xblocksize>MAXBLOCKSIZE) {
+		fprintf(stderr,"Invalid blocksize given for bad block exclude file! Aborting!\n");
+		arglist_kill(carglist);
+		return 2;
+	}
+
+	excluding=0;
+	if (arglist_arggiven(carglist,"-X")==0) {
+		excluding=1;
+		xblocksinfile=arglist_parameter(carglist,"-X",0);
+		fprintf(stdout,"Exclusion mode, excluding badblocks file: %s with blocksize %i.\n",xblocksinfile,xblocksize);
+	}
+
 	bblocksoutfile=NULL;
 	if (arglist_arggiven(carglist,"-o")==0) {
 		bblocksoutfile=arglist_parameter(carglist,"-o",0);
@@ -372,10 +398,21 @@ int main(int argc, char ** argv) {
 		arglist_kill(carglist);
 		return 2;
 	}
+	if (excluding==1) {
+		xblocksin=fopen(xblocksinfile,"r");
+		if (xblocksin==NULL) {
+			close(source);
+			fprintf(stderr,"Error opening exclusion badblock file for reading: %s \n",xblocksinfile);
+			perror("Reason");
+			arglist_kill(carglist);
+			return 2;
+		}
+	}
 	if (incremental==1) {
 		bblocksin=fopen(bblocksinfile,"r");
 		if (bblocksin==NULL) {
 			close(source);
+			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening badblock file for reading: %s \n",bblocksinfile);
 			perror("Reason");
 			arglist_kill(carglist);
@@ -385,6 +422,7 @@ int main(int argc, char ** argv) {
 		if (destination==-1) {
 			close(source);
 			fclose(bblocksin);
+			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening destination: %s \n",destfile);
 			perror("Reason");
 			usage(argv[0]);
@@ -395,6 +433,7 @@ int main(int argc, char ** argv) {
 		destination=open(destfile,O_WRONLY | O_TRUNC | O_CREAT,0666 );
 		if (destination==-1) {
 			close(source);
+			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening destination: %s \n",destfile);
 			perror("Reason");
 			usage(argv[0]);
@@ -407,9 +446,8 @@ int main(int argc, char ** argv) {
 		if (bblocksout==-1) {
 			close(source);
 			close(destination);
-			if (incremental==1) {
-				fclose(bblocksin);
-			}
+			if (incremental==1) fclose(bblocksin);
+			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening badblock file for writing: %s \n",bblocksoutfile);
 			perror("Reason");
 			arglist_kill(carglist);
@@ -434,6 +472,7 @@ int main(int argc, char ** argv) {
 	lasterror=0;
 	lastgood=0;
 	lastbadblock=-1;
+	lastxblock=-1;
 	lastsourceblock=-1;
 	damagesize=0;
 	backtracemode=0;
@@ -462,12 +501,9 @@ int main(int argc, char ** argv) {
 			fprintf(stderr,"\nError on reopening sourcefile during error recovery - copy failed!\n");
 			perror("Reason");
 			close(destination);
-			if (incremental==1) {
-				fclose(bblocksin);
-			}
-			if (bblocksoutfile!=NULL) {
-				close(bblocksout);
-			}
+			if (incremental==1) fclose(bblocksin);
+			if (excluding==1) fclose(xblocksin);
+			if (bblocksoutfile!=NULL) close(bblocksout);
 			arglist_kill(carglist);
 			return 2;
 		}
@@ -481,28 +517,74 @@ int main(int argc, char ** argv) {
 
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
-			if (incremental) {
-				// Incremental mode. Skip over unnecessary areas.
-				// check wether the current block is in the badblocks list, 
-				// if so, (and no read error condition) proceed as usual,
-				// otherwise seek to the next badblock in input
-				tmp_pos=(sposition)/iblocksize;
-				if (tmp_pos>lastsourceblock && newerror>0) {
-					tmp=NULL;
-					do {
-						tmp=fgets(textbuffer,64,bblocksin);
-						if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
-					} while (tmp!=NULL && lastsourceblock<tmp_pos );
-					if (tmp==NULL) {
-						// no more bad blocks in input file
-						break;
+			do {
+				// if necessary, repeatedly calculate include and exclude blocks
+				// (for example if we seek to a new include block, but then exclude it,
+				// so we seek to the next, then exclude it, etc)
+				if (incremental) {
+					// Incremental mode. Skip over unnecessary areas.
+					// check wether the current block is in the badblocks list, 
+					// if so, (or a read error condition) proceed as usual,
+					// otherwise seek to the next badblock in input
+					tmp_pos=(readposition+startoffset)/iblocksize;
+					if (tmp_pos>lastsourceblock && newerror>0) {
+						tmp=NULL;
+						do {
+							tmp=fgets(textbuffer,64,bblocksin);
+							if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
+						} while (tmp!=NULL && lastsourceblock<tmp_pos );
+						if (tmp==NULL) {
+							// no more bad blocks in input file
+							// make sure main loop exits asap
+							remain=0;
+							break;
+						}
+						readposition=(lastsourceblock*iblocksize)-startoffset;
 					}
-					readposition=(lastsourceblock*iblocksize)-startoffset;
 				}
-			}
-			remain=((((readposition/blocksize)+1)*blocksize)-readposition);
-			// make sure any misalignment to block boundaries get corrected asap
+				if (excluding) {
+					// Exclusion mode, read next new exclusion block
+					// from badblocks file, if we are already read past it
+					tmp_pos=(readposition+startoffset)/xblocksize;
+					if (tmp_pos>lastxblock) {
+						tmp=NULL;
+						do {
+							tmp=fgets(textbuffer,64,xblocksin);
+							if (sscanf(textbuffer,"%llu",&lastxblock)!=1) tmp=NULL;
+						} while (tmp!=NULL && lastxblock<tmp_pos );
+						if (tmp==NULL) {
+							// no more bad blocks in input file
+							excluding=0;
+							lastxblock=-1;
+						}
+					}
+					if (tmp_pos==lastxblock) {
+						// we have a match, clean up, then skip this block
+						if (newerror==0) {
+							// clean up
+							newerror=retries;
+							tmp_pos=readposition/blocksize;
+							tmp_bytes=readposition-lastgood;
+							damagesize+=tmp_bytes;
+							sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
+							write(1,textbuffer,strlen(textbuffer));
+							write(2,&"\n",1);
+							output=1;
+							linewidth=0;
+							backtracemode=0;
+							lasterror=readposition;
+							// restore overwritten var
+							tmp_pos=lastxblock;
+						}
+						readposition=((lastxblock+1)*xblocksize)-startoffset;
+					}
+				}
+				// make sure any misalignment to block boundaries get corrected asap
+				remain=((((readposition/blocksize)+1)*blocksize)-readposition);
+			} while (excluding && tmp_pos==lastxblock);
+			// break from above jumps here, with remain=0
 		}
+
 
 		// seek and read - timed
 		gettimeofday(&oldtime,NULL);
@@ -536,12 +618,9 @@ int main(int argc, char ** argv) {
 							fprintf(stderr,"\nError on reopening sourcefile after external seek - copy failed!\n");
 							perror("Reason");
 							close(destination);
-							if (incremental==1) {
-								fclose(bblocksin);
-							}
-							if (bblocksoutfile!=NULL) {
-								close(bblocksout);
-							}
+							if (incremental==1) fclose(bblocksin);
+							if (excluding==1) fclose(xblocksin);
+							if (bblocksoutfile!=NULL) close(bblocksout);
 							arglist_kill(carglist);
 							return 2;
 						}
@@ -552,20 +631,21 @@ int main(int argc, char ** argv) {
 				}
 			}
 		}
-		// prevent negative write offsets, otherwise write where we read
+		// prevent negative write offsets
 		if (sposition>startoffset) {
 			readposition=sposition-startoffset;
 		} else {
 			readposition=0;
 		}
+		// make sure not to read beyond the specified end
+		if (length>=0) {
+			if (readposition>=length) readposition=length;
+			if (readposition+remain>=length) remain=length-readposition;
+		}
+		// write where we read
 		writeposition=readposition;
 		if (filesize>startoffset) {
 			percent=(100*(readposition))/(filesize-startoffset);
-		}
-
-		// calculate how much is left to copy
-		if (readposition+remain>length && length>=0) {
-			remain=length-readposition;
 		}
 
 		// select for reading. Have a fallback output in case of timeout.
@@ -695,12 +775,9 @@ int main(int argc, char ** argv) {
 						perror("Reason");
 						close(destination);
 						close(source);
-						if (incremental==1) {
-							fclose(bblocksin);
-						}
-						if (bblocksoutfile!=NULL) {
-							close(bblocksout);
-						}
+						if (incremental==1) fclose(bblocksin);
+						if (excluding==1) fclose(xblocksin);
+						if (bblocksoutfile!=NULL) close(bblocksout);
 						arglist_kill(carglist);
 						return 2;
 					}
@@ -710,12 +787,9 @@ int main(int argc, char ** argv) {
 						perror("Reason");
 						close(destination);
 						close(source);
-						if (incremental==1) {
-							fclose(bblocksin);
-						}
-						if (bblocksoutfile!=NULL) {
-							close(bblocksout);
-						}
+						if (incremental==1) fclose(bblocksin);
+						if (excluding==1) fclose(xblocksin);
+						if (bblocksoutfile!=NULL) close(bblocksout);
 						arglist_kill(carglist);
 						return 2;
 					}
@@ -783,7 +857,12 @@ int main(int argc, char ** argv) {
 
 					// skip ahead(virtually)
 					readposition+=remain;
-					remain=0;
+					if (!backtracemode) {
+						// force re-calculation of next blocksize to fix
+						// block misalignment caused by partial data reading.
+						// doing so during backtrace would cause an infinite loop.
+						remain=0;
+					}
 
 				}
 
@@ -796,12 +875,9 @@ int main(int argc, char ** argv) {
 				fprintf(stderr,"\nError on reopening sourcefile during error recovery - copy failed!\n");
 				perror("Reason");
 				close(destination);
-				if (incremental==1) {
-					fclose(bblocksin);
-				}
-				if (bblocksoutfile!=NULL) {
-					close(bblocksout);
-				}
+				if (incremental==1) fclose(bblocksin);
+				if (excluding==1) fclose(xblocksin);
+				if (bblocksoutfile!=NULL) close(bblocksout);
 				arglist_kill(carglist);
 				return 2;
 			}
@@ -840,11 +916,9 @@ int main(int argc, char ** argv) {
 
 	close(destination);
 	close(source);
-	if (incremental==1) {
-		fclose(bblocksin);
-	}
-	if (bblocksoutfile!=NULL) {
-		close(bblocksout);
-	}
+	if (incremental==1) fclose(bblocksin);
+	if (excluding==1) fclose(xblocksin);
+	if (bblocksoutfile!=NULL) close(bblocksout);
 	arglist_kill(carglist);
+	return(0);
 }

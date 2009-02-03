@@ -2,42 +2,41 @@ Safe copying of files and partitions.
 
 Idea:
 
-The main problem with damaged storage hardware is,
-that once you get an unrecoverable IO error
-further reading from the file / device often fails until the file
-has been closed and re-opened.
+The main problem with damaged storage hardware is, that once you get an
+unrecoverable IO error further reading from the file / device often fails until
+the file has been closed and re-opened.
 
-The normal copy tools like cat, cp or dd do not allow
-creation of an image file from a diskette or cdrom
-once reading of a sector failed.
+The normal copy tools like cat, cp or dd do not allow creation of an image file
+from a disk or CD-ROM once reading of a sector failed.
 
-Safecopy tries to get as much data from the source as possible
-without device dependent tricks.
+Safecopy tries to get as much data from the source as possible without device
+dependent tricks.
 
-(for example to get an ISO image from a copy protected 
- or otherwise damaged CD-ROM, cdrdao and bin2iso would possibly
- do a better and faster job)
+(for example to get an ISO image from a copy protected or otherwise damaged
+ CD-ROM, cdrdao and bin2iso would possibly do a better and faster job)
 
-This is achieved by multiple reads from smaller sections at
-the begin of every IO error causing (i.e. damaged) area,
-skipping that area while padding the destination file with zeroes,
-and continuing where readable data starts again,
+This is achieved by multiple reads from smaller sections at the begin of every
+IO error causing (i.e. damaged) area, skipping that area while padding the
+destination file with zeroes, and continuing where readable data starts again,
 using a similar algorithm to find the true end of the damaged area.
 
 For this to work, the source device or file has to be seekable.
-For unseekable devices (like tapes) you can use an external script
-to execute a controlled skip over the damaged part for you.
+For unseekable devices (like tapes) you can use an external script to execute a
+controlled skip over the damaged part for you.
 (For example by using "mt seek" and "mt tell" on an SCSI tape device)
 See the "-S <seekscript>" parameter for details.
 
-Performance and success of this tool depend extremely
-on the device driver, firmware and underlying hardware.
+Performance and success of this tool depend extremely on the device driver,
+firmware and underlying hardware.
 
-Some DVD drives are known to cause the ATAPI bus to crash on errors,
-causing the device driver to freeze for times up to and beyond.
+Some DVD drives are known to cause the ATAPI bus to crash on errors, causing
+the device driver to freeze for times up to and beyond a minute per error. Try
+to avoid using such drives
 
-Some drives can read bad media better than others. Be sure to attempt data recovery of CDs and DVDs on several different drives and computers.
-You can use safecopys incremental recovery feature to read previously unreadable sectors.
+Some drives can read bad media better than others. Be sure to attempt data
+recovery of CDs and DVDs on several different drives and computers.
+You can use safecopys incremental recovery feature to read previously
+unreadable sectors.
 
 Usage: safecopy [options] <source> <target>
 Options:
@@ -69,6 +68,12 @@ Options:
 	                    Default: none
 	-i <bytes> : Blocksize to interprete the badblockfile given with -I.
 	             Default: Blocksize as specified by -b
+	-X <badblockfile> : Exclusion mode. Do not attemp to read blocks in
+	                    badblockfile. If used together with -I,
+	                    excluded blocks override included blocks.
+	                    Default: none
+	-x <bytes> : Blocksize to interprete the badblockfile given with -X.
+	             Default: Blocksize as specified by -b
 	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.
 	                    Default: none
 	-S <seekscript> : Use external script for seeking in input file.
@@ -78,7 +83,7 @@ Options:
 	                  the blocksize in bytes as argv2
 	                  and the current position (in bytes) as argv3.
 	                  Return value needs to be the number of blocks
-	                  succesfully skipped, or 0 to indicate seek failure.
+	                  successfully skipped, or 0 to indicate seek failure.
 	                  The external seekscript will only be used
 	                  if lseek() fails and we need to skip over data.
 	                  Default: none
