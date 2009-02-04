@@ -1,3 +1,32 @@
+<html>
+<head>
+<title>
+safecopy
+</title>
+</head>
+<body>
+<h1 align=center>
+safecopy
+</h1>
+<p align=right>
+<A href="http://sourceforge.net"><IMG src="http://sourceforge.net/sflogo.php?group_id=141056&amp;type=5" width="210" height="62" border="0" alt="SourceForge.net Logo" /></A>
+</p>
+<h2>
+safecopy is a data recovery tool which tries to extract as much data as possible from a problematic (i.e. damaged sectors) source - like floppy drives, harddisk partitions, CDs, tape devices, ..., where other tools like dd would fail doe to I/O errors.
+</h2>
+
+<p>
+<a href="http://sourceforge.net/projects/safecopy">Sourceforge Project page</a>
+</p>
+<p>
+<a href="http://freshmeat.net/projects/safecopy">Freshmeat Project page</a>
+</p>
+
+<p>
+<a href="http://sourceforge.net/project/showfiles.php?group_id=141056&package_id=154761">safecopy download page (SF)</a>
+</p>
+<p>Project by Corvus Corax (corvuscorax&lt;at&gt;cybertrench.com) - distributed under the <a href="http://www.gnu.org/copyleft/gpl.html">GPL</a> (v2 or higher)</p>
+<pre>
 Safe copying of files and partitions.
 
 Idea:
@@ -24,7 +53,7 @@ For this to work, the source device or file has to be seekable.
 For unseekable devices (like tapes) you can use an external script to execute a
 controlled skip over the damaged part for you.
 (For example by using "mt seek" and "mt tell" on an SCSI tape device)
-See the "-S <seekscript>" parameter for details.
+See the "-S &lt;seekscript&gt;" parameter for details.
 
 Performance and success of this tool depend extremely on the device driver,
 firmware and underlying hardware.
@@ -61,25 +90,25 @@ Different use cases:
 	safecopy source dest -r 1 -R 4 -Z 2 -I badblockfile-16384 -i 16384
 
 - utilize some friends CD-ROM drives to complete the data from my damaged CD:
-	safecopy /dev/mydrive imagefile <someoptions> -b <myblocksize> \
+	safecopy /dev/mydrive imagefile &lt;someoptions&gt; -b &lt;myblocksize&gt; \
 		-o myblockfile;
-	safecopy /dev/otherdrive imagefile <someoptions> -b <otherblocksize> \
-		-I myblockfile -i <myblocksize> -o otherblockfile;
-	safecopy /dev/anotherdrive imagefile <someoptions> \
-		-b <anotherblocksize> -I otherblockfile -i <otherblocksize>
+	safecopy /dev/otherdrive imagefile &lt;someoptions&gt; -b &lt;otherblocksize&gt; \
+		-I myblockfile -i &lt;myblocksize&gt; -o otherblockfile;
+	safecopy /dev/anotherdrive imagefile &lt;someoptions&gt; \
+		-b &lt;anotherblocksize&gt; -I otherblockfile -i &lt;otherblocksize&gt;
 
 - interrupt and later resume a data rescue operation:
 	safecopy source dest
-	<CTRL+C> (safecopy aborts)
+	&lt;CTRL+C&gt; (safecopy aborts)
 	safecopy source dest -I /dev/null
 
 - interrupt and later resume a data rescue operation with correct
   badblocks output:
-	safecopy source dest <options> -o badblockfile
-	<CTRL+C> (safecopy aborts)
+	safecopy source dest &lt;options&gt; -o badblockfile
+	&lt;CTRL+C&gt; (safecopy aborts)
 	mv badblockfile savedbadblockfile
 	safecopy source dest -I /dev/null -o badblockfile
-	cat badblockfile >>savedbadblockfile
+	cat badblockfile &gt;&gt;savedbadblockfile
 
 - find the corrupted files on a partially successful rescued file system:
 	safecopy /dev/filesystem image -M CoRrUpTeD
@@ -91,12 +120,12 @@ Different use cases:
 
 - exclude the previously known badblocks list of a filesystem from
   filesystem image creation:
-  	dumpe2fs -b /dev/filesystem >badblocklist
+  	dumpe2fs -b /dev/filesystem &gt;badblocklist
 	safecopy /dev/filesystem image \
-		-X badblocklist -x <blocksize of your fs>
+		-X badblocklist -x &lt;blocksize of your fs&gt;
 
 - create an image of a device that starts at X and is Y in size:
-	safecopy /dev/filesystem -b <bsize> -s <X/bsize> -l <Y/bsize>
+	safecopy /dev/filesystem -b &lt;bsize&gt; -s &lt;X/bsize&gt; -l &lt;Y/bsize&gt;
 
 - rescue data of a tape device:
 	If the tape device driver supports lseek(), treat it as any file,
@@ -173,50 +202,50 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive
 
 Safecopy 1.0 by CorvusCorax
-Usage: safecopy [options] <source> <target>
+Usage: safecopy [options] &lt;source&gt; &lt;target&gt;
 Options:
-	-b <bytes> : Blocksize in bytes, also used as skipping offset
+	-b &lt;bytes&gt; : Blocksize in bytes, also used as skipping offset
 	             when searching for the end of a bad area.
 	             Set this to the physical sectorsize of your media.
 	             Default: Blocksize of input device, if determinable,
 	                      otherwise 512
-	-r <bytes> : Resolution in bytes when searching for the exact
+	-r &lt;bytes&gt; : Resolution in bytes when searching for the exact
 	             beginning or end of a bad area.
 	             Smaller values lead to very thorough attempts to read
 	             data at the edge of damaged areas,
 	             but increase the strain on the damaged media.
 	             Default: 1
-	-R <number> : At least that many read attempts are made on the first
+	-R &lt;number&gt; : At least that many read attempts are made on the first
 	              bad block of a damaged area with minimum resolution.
 	              Higher values can sometimes recover a weak sector,
 	              but at the cost of additional strain.
 	              Default: 3
-	-Z <number> : On each error, force seek the read head from start to
+	-Z &lt;number&gt; : On each error, force seek the read head from start to
 	              end of the source device as often as specified.
 	              That takes time, creates additional strain and might
 	              not be supported by all devices or drivers.
 	              Default: 1
-	-s <blocks> : Start position where to start reading.
+	-s &lt;blocks&gt; : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
 	              Default: block 0
-	-l <blocks> : Maximum length of data to be read.
+	-l &lt;blocks&gt; : Maximum length of data to be read.
 	              Default: Entire size of input file
-	-I <badblockfile> : Incremental mode. Assume the target file already
+	-I &lt;badblockfile&gt; : Incremental mode. Assume the target file already
 	                    exists and has holes specified in a badblockfile.
 	                    It will be attempted to retrieve more data from
 	                    the missing areas only.
 	                    Default: none
-	-i <bytes> : Blocksize to interpret the badblockfile given with -I.
+	-i &lt;bytes&gt; : Blocksize to interpret the badblockfile given with -I.
 	             Default: Blocksize as specified by -b
-	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in
+	-X &lt;badblockfile&gt; : Exclusion mode. Do not attempt to read blocks in
 	                    badblockfile. If used together with -I,
 	                    excluded blocks override included blocks.
 	                    Default: none
-	-x <bytes> : Blocksize to interpret the badblockfile given with -X.
+	-x &lt;bytes&gt; : Blocksize to interpret the badblockfile given with -X.
 	             Default: Blocksize as specified by -b
-	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.
+	-o &lt;badblockfile&gt; : Write a badblocks/e2fsck compatible bad block file.
 	                    Default: none
-	-S <seekscript> : Use external script for seeking in input file.
+	-S &lt;seekscript&gt; : Use external script for seeking in input file.
 	                  (Might be useful for tape devices and similar).
 	                  Seekscript must be an executable that takes the
 	                  number of blocks to be skipped as argv1 (1-64)
@@ -227,7 +256,7 @@ Options:
 	                  The external seekscript will only be used
 	                  if lseek() fails and we need to skip over data.
 	                  Default: none
-	-M <string> : Mark unrecovered data with this string instead of
+	-M &lt;string&gt; : Mark unrecovered data with this string instead of
 	              skipping / zero-padding it. This helps in later
 	              finding affected files on file system images
 	              that couldn't be rescued completely.
@@ -239,7 +268,7 @@ Description of output:
 	_ : Read of block was incomplete. (possibly end of file)
 	    The blocksize is now reduced to read the rest.
 	|/| : Seek failed, source can only be read sequentially.
-	> : Read failed, reducing blocksize to read partial data.
+	&gt; : Read failed, reducing blocksize to read partial data.
 	! : A low level error on read attempt of smallest allowed size
 	    leads to a retry attempt.
 	[xx](+yy){ : Current block and number of bytes continuously
@@ -247,7 +276,7 @@ Description of output:
 	X : Read failed on a block with minimum blocksize and is skipped.
 	    Unrecoverable error, destination file is padded with zeros.
 	    Data is now skipped until end of the unreadable area is reached.
-	< : Successful read after the end of a bad area causes
+	&lt; : Successful read after the end of a bad area causes
 	    backtracking with smaller blocksizes to search for the first
 	    readable data.
 	}[xx](+yy) : current block and number of bytes of recent
@@ -255,3 +284,6 @@ Description of output:
 
 Copyright 2009, distributed under terms of the GPL
 
+</pre>
+
+</html>

@@ -67,18 +67,18 @@ void usage(char * name) {
 	fprintf(stderr,"	                    It will be attempted to retrieve more data from\n");
 	fprintf(stderr,"	                    the missing areas only.\n");
 	fprintf(stderr,"	                    Default: none\n");
-	fprintf(stderr,"	-i <bytes> : Blocksize to interprete the badblockfile given with -I.\n");
+	fprintf(stderr,"	-i <bytes> : Blocksize to interpret the badblockfile given with -I.\n");
 	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
-	fprintf(stderr,"	-X <badblockfile> : Exclusion mode. Do not attemp to read blocks in\n");
+	fprintf(stderr,"	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in\n");
 	fprintf(stderr,"	                    badblockfile. If used together with -I,\n");
 	fprintf(stderr,"	                    excluded blocks override included blocks.\n");
 	fprintf(stderr,"	                    Default: none\n");
-	fprintf(stderr,"	-x <bytes> : Blocksize to interprete the badblockfile given with -X.\n");
+	fprintf(stderr,"	-x <bytes> : Blocksize to interpret the badblockfile given with -X.\n");
 	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
 	fprintf(stderr,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
 	fprintf(stderr,"	                    Default: none\n");
 	fprintf(stderr,"	-S <seekscript> : Use external script for seeking in input file.\n");
-	fprintf(stderr,"	                  (Might be usefull for tape devices and similar).\n");
+	fprintf(stderr,"	                  (Might be useful for tape devices and similar).\n");
 	fprintf(stderr,"	                  Seekscript must be an executable that takes the\n");
 	fprintf(stderr,"	                  number of blocks to be skipped as argv1 (1-64)\n");
 	fprintf(stderr,"	                  the blocksize in bytes as argv2\n");
@@ -88,12 +88,17 @@ void usage(char * name) {
 	fprintf(stderr,"	                  The external seekscript will only be used\n");
 	fprintf(stderr,"	                  if lseek() fails and we need to skip over data.\n");
 	fprintf(stderr,"	                  Default: none\n");
+	fprintf(stderr,"	-M <string> : Mark unrecovered data with this string instead of\n");
+	fprintf(stderr,"	              skipping / zero-padding it. This helps in later\n");
+	fprintf(stderr,"	              finding affected files on file system images\n");
+	fprintf(stderr,"	              that couldn't be rescued completely.\n");
+	fprintf(stderr,"	              Default: none\n");
 	fprintf(stderr,"	-h | --help : Show this text\n\n");
 	fprintf(stderr,"Description of output:\n");
 	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
 	fprintf(stderr,"	_ : Read of block was incomplete. (possibly end of file)\n");
 	fprintf(stderr,"	    The blocksize is now reduced to read the rest.\n");
-	fprintf(stderr,"	|/| : Seek failed, source can only be read sequencially.\n");
+	fprintf(stderr,"	|/| : Seek failed, source can only be read sequentially.\n");
 	fprintf(stderr,"	> : Read failed, reducing blocksize to read partial data.\n");
 	fprintf(stderr,"	! : A low level error on read attempt of smallest allowed size\n");
 	fprintf(stderr,"	    leads to a retry attempt.\n");
@@ -233,6 +238,8 @@ int main(int argc, char ** argv) {
 	char textbuffer[256];
 	// buffer pointer for sfgets() 
 	char *tmp;
+	// pointer to marker string
+	char *marker;
 	// several local integer variables
 	int blocksize,iblocksize,xblocksize,resolution,retries,seeks,cseeks;
 	int incremental,excluding;
@@ -273,6 +280,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-x",1);
 	arglist_addarg (carglist,"-S",1);
 	arglist_addarg (carglist,"-Z",1);
+	arglist_addarg (carglist,"-M",1);
 
 	human=(isatty(1) & isatty(2));
 	
@@ -388,6 +396,12 @@ int main(int argc, char ** argv) {
 	if (arglist_arggiven(carglist,"-S")==0) {
 		seekscriptfile=arglist_parameter(carglist,"-S",0);
 		fprintf(stdout,"Seek script (fallback): %s\n",seekscriptfile);
+	}
+
+	marker=NULL;
+	if (arglist_arggiven(carglist,"-M")==0) {
+		marker=arglist_parameter(carglist,"-M",0);
+		fprintf(stdout,"Marker string: %s\n",marker);
 	}
 
 	startoffset=0;
@@ -922,6 +936,62 @@ int main(int argc, char ** argv) {
 					// skip ahead(virtually)
 					readposition+=remain;
 					if (!backtracemode) {
+						if (marker) {
+							// if a marker is given, we need to write it to the
+							// destination at the current position
+							// first copy the marker into the data buffer
+							writeoffset=0;
+							writeremain=strlen(marker);
+							while (writeoffset+writeremain<remain) {
+								memcpy(databuffer+writeoffset,marker,writeremain);
+								writeoffset+=writeremain;
+							}
+							memcpy(databuffer+writeoffset,marker,remain-writeoffset);
+							// now write it to disk
+							writeremain=remain;
+							writeoffset=0;
+							if (sposition<startoffset) {
+								// handle cases where unwanted data has been read doe to seek error
+								if ((sposition+block)<=startoffset) {
+									// we read data we are supposed to skip! Ignore.
+									writeremain=0;
+								} else {
+									// partial skip
+									writeremain=(sposition+block)-startoffset;
+									writeoffset=startoffset-sposition;
+								}
+							}
+							while (writeremain>0) {
+								// write data to destination file
+								cposition=lseek(destination,writeposition,SEEK_SET);
+								if (cposition<0) {
+									fprintf(stderr,"\nError: seek() in %s failed",destfile);
+									perror("");
+									close(destination);
+									close(source);
+									if (incremental==1) fclose(bblocksin);
+									if (excluding==1) fclose(xblocksin);
+									if (bblocksoutfile!=NULL) close(bblocksout);
+									arglist_kill(carglist);
+									return 2;
+								}
+								writeblock=write(destination,databuffer+writeoffset,writeremain);
+								if (writeblock<=0) {
+									fprintf(stderr,"\nError: write to %s failed",destfile);
+									perror("");
+									close(destination);
+									close(source);
+									if (incremental==1) fclose(bblocksin);
+									if (excluding==1) fclose(xblocksin);
+									if (bblocksoutfile!=NULL) close(bblocksout);
+									arglist_kill(carglist);
+									return 2;
+								}
+								writeremain-=writeblock;
+								writeoffset+=writeblock;
+								writeposition+=writeblock;
+							}
+						}
 						// force re-calculation of next blocksize to fix
 						// block misalignment caused by partial data reading.
 						// doing so during backtrace would cause an infinite loop.

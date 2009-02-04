@@ -12,4 +12,14 @@
 - Added incremental mode to improve a filesystem image based on an existing badblock list.
 - Automatic blocksize calculation based on stat().
 - Percentage counter in case of known filesize (or maximum size given on commandline).
-- Smily indicator based on data read timing. 
+- Smily indicator based on data read timing.
+
+2009.02.05:
+- Added head-realignment trick to improve error recovery on some drives.
+- Added resume functionality
+- Text output refurbished and made terminal dependant
+- Badblocks exclusion lists supported
+- Mark-padding feature (to find read-failure affected files in a safecopied filesystem image)
+- Documentation updated
+
+
