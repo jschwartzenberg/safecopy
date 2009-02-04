@@ -249,7 +249,7 @@ int main(int argc, char ** argv) {
 	// stat() needs this
 	struct stat filestatus;
 	// input filesize and size of unreadable area
-	off_t filesize,damagesize;
+	off_t filesize,damagesize,targetsize;
 	// times
 	struct timeval oldtime,newtime;
 	// and timing helper variables
@@ -437,6 +437,7 @@ int main(int argc, char ** argv) {
 			return 2;
 		}
 	}
+	targetsize=0;
 	if (incremental==1) {
 		bblocksin=fopen(bblocksinfile,"r");
 		if (bblocksin==NULL) {
@@ -457,6 +458,20 @@ int main(int argc, char ** argv) {
 			if (human) usage(argv[0]);
 			arglist_kill(carglist);
 			return 2;
+		}
+		// try to complete incomplete (aborted) safecopies by comparing file sizes
+		if (!fstat(destination,&filestatus)) {
+			targetsize=filestatus.st_size;
+		}
+		if (!targetsize) {
+			fprintf(stderr,"Destination filesize not reported by stat(), trying seek().\n");
+			targetsize=lseek(destination,0,SEEK_END);
+			if (targetsize<0) targetsize=0;
+		}
+		if (!targetsize) {
+			fprintf(stderr,"Error determining destination file size, cannot resume!");
+		} else {
+			fprintf(stdout,"Current destination size: %llu\n",targetsize);
 		}
 	} else {
 		destination=open(destfile,O_WRONLY | O_TRUNC | O_CREAT,0666 );
@@ -566,9 +581,17 @@ int main(int argc, char ** argv) {
 						} while (tmp!=NULL && lastsourceblock<tmp_pos );
 						if (tmp==NULL) {
 							// no more bad blocks in input file
-							// make sure main loop exits asap
-							remain=0;
-							break;
+							// if exists
+							if ((readposition+startoffset)<targetsize) {
+								// go to end of target file for resuming
+								lastsourceblock=targetsize/iblocksize;
+							} else if (targetsize) {
+								lastsourceblock=tmp_pos;
+							} else {
+								// othewise end immediately
+								remain=0;
+								break;
+							}
 						}
 						readposition=(lastsourceblock*iblocksize)-startoffset;
 					}
