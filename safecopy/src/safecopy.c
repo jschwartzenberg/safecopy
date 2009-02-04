@@ -16,9 +16,9 @@
 
 #define MAXBLOCKSIZE 1048576
 #define BLOCKSIZE 512
-#define RESOLUTION 4
-#define RETRIES 2
-#define SEEKS 0
+#define RESOLUTION 1
+#define RETRIES 3
+#define SEEKS 1
 
 #define VERY_FAST 100
 #define FAST VERY_FAST*100
@@ -33,6 +33,7 @@
 #define VERY_VERY_SLOW_ICON "  8-X"
 
 void usage(char * name) {
+	fprintf(stderr,"Safecopy "VERSION" by CorvusCorax\n");
 	fprintf(stderr,"Usage: %s [options] <source> <target>\n",name);
 	fprintf(stderr,"Options:\n");
 	fprintf(stderr,"	-b <bytes> : Blocksize in bytes, also used as skipping offset\n");
@@ -534,6 +535,7 @@ int main(int argc, char ** argv) {
 			arglist_kill(carglist);
 			return 2;
 		}
+		fprintf(stdout,"|/|");
 	} else {
 		sposition=cposition;
 		seekable=1;
