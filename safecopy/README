@@ -56,6 +56,11 @@ Options:
 	              Higher values can sometimes recover a weak sector,
 	              but at the cost of additional strain.
 	              Default: 2
+	-Z <number> : On each error, force seek the read head from start to
+	              end of the source device as often as specified.
+	              That takes time, creates additional strain and might
+	              not be supported by all devices or drivers.
+	              Default: 0
 	-s <blocks> : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
 	              Default: block 0
@@ -93,6 +98,7 @@ Description of output:
 	. : Between 1 and 1024 blocks successfully read.
 	_ : Read of block was incomplete. (possibly end of file)
 	    The blocksize is now reduced to read the rest.
+	|/| : Seek failed, source can only be read sequencially.
 	> : Read failed, reducing blocksize to read partial data.
 	! : A low level error on read attempt of smallest allowed size
 	    leads to a retry attempt.

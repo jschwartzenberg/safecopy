@@ -18,6 +18,7 @@
 #define BLOCKSIZE 512
 #define RESOLUTION 4
 #define RETRIES 2
+#define SEEKS 0
 
 #define VERY_FAST 100
 #define FAST VERY_FAST*100
@@ -50,6 +51,11 @@ void usage(char * name) {
 	fprintf(stderr,"	              Higher values can sometimes recover a weak sector,\n");
 	fprintf(stderr,"	              but at the cost of additional strain.\n");
 	fprintf(stderr,"	              Default: %i\n",RETRIES);
+	fprintf(stderr,"	-Z <number> : On each error, force seek the read head from start to\n");
+	fprintf(stderr,"	              end of the source device as often as specified.\n");
+	fprintf(stderr,"	              That takes time, creates additional strain and might\n");
+	fprintf(stderr,"	              not be supported by all devices or drivers.\n");
+	fprintf(stderr,"	              Default: %i\n",SEEKS);
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
 	fprintf(stderr,"	              Default: block 0\n");
@@ -86,6 +92,7 @@ void usage(char * name) {
 	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
 	fprintf(stderr,"	_ : Read of block was incomplete. (possibly end of file)\n");
 	fprintf(stderr,"	    The blocksize is now reduced to read the rest.\n");
+	fprintf(stderr,"	|/| : Seek failed, source can only be read sequencially.\n");
 	fprintf(stderr,"	> : Read failed, reducing blocksize to read partial data.\n");
 	fprintf(stderr,"	! : A low level error on read attempt of smallest allowed size\n");
 	fprintf(stderr,"	    leads to a retry attempt.\n");
@@ -226,7 +233,7 @@ int main(int argc, char ** argv) {
 	// buffer pointer for sfgets() 
 	char *tmp;
 	// several local integer variables
-	int blocksize,iblocksize,xblocksize,resolution,retries;
+	int blocksize,iblocksize,xblocksize,resolution,retries,seeks,cseeks;
 	int incremental,excluding;
 	int counter,percent,oldpercent,newerror,newsofterror;
 	int backtracemode,output,linewidth,seekable;
@@ -264,6 +271,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-X",1);
 	arglist_addarg (carglist,"-x",1);
 	arglist_addarg (carglist,"-S",1);
+	arglist_addarg (carglist,"-Z",1);
 
 	human=(isatty(1) & isatty(2));
 	
@@ -288,6 +296,7 @@ int main(int argc, char ** argv) {
 			blocksize=filestatus.st_blksize;
 		}
 	}
+
 	if (arglist_arggiven(carglist,"-b")==0) {
 		blocksize=arglist_integer(arglist_parameter(carglist,"-b",0));
 	}
@@ -298,7 +307,18 @@ int main(int argc, char ** argv) {
 	if (filesize!=0) {
 		fprintf(stdout,"File size: %llu\n",filesize);
 	} else {
-		fprintf(stderr,"Unable to determine input file size.\n");
+		fprintf(stderr,"Filesize not reported by stat(), trying seek().\n");
+		source=open(sourcefile,O_RDONLY);
+		if (source) {
+			filesize=lseek(source,0,SEEK_END);
+			close(source);
+		}
+		if (filesize<=0) {
+			filesize=0;
+			fprintf(stderr,"Unable to determine input file size.\n");
+		} else {
+			fprintf(stdout,"File size: %llu\n",filesize);
+		}
 	}
 	
 	resolution=RESOLUTION;
@@ -315,6 +335,13 @@ int main(int argc, char ** argv) {
 	}
 	if (retries<1) retries=1;
 	fprintf(stdout,"Min read attempts: %u\n",retries);
+
+	seeks=SEEKS;
+	if (arglist_arggiven(carglist,"-Z")==0) {
+		seeks=arglist_integer(arglist_parameter(carglist,"-Z",0));
+	}
+	if (seeks<0) seeks=0;
+	fprintf(stdout,"Head moves on read error: %i\n",seeks);
 
 	iblocksize=blocksize;
 	if (arglist_arggiven(carglist,"-i")==0) {
@@ -598,12 +625,15 @@ int main(int argc, char ** argv) {
 				seekable=1;
 			} else {
 				// seek failed, check why
-				if (errno==EINVAL && seekable==1 && newerror==0) {
-					// tried to seek past the end of file during skipping of erroneous area
+				if (errno==EINVAL && seekable==1) {
+					// tried to seek past the end of file. End reading.
 					break;
 				} else {
 					// input file is not seekable!
-					seekable=0;
+					if (seekable) {
+						write(1,&"|/|",3);
+						seekable=0;
+					}
 					if (readposition+startoffset>sposition) {
 						// emergency seek will only handle positive seeks
 						// close input file for seek/skip
@@ -879,6 +909,22 @@ int main(int argc, char ** argv) {
 
 			// reopen source file to clear possible error flags preventing us from getting more data
 			close (source);
+			// do some forced seeks to move head around.
+			for (cseeks=0;cseeks<seeks;cseeks++) {
+				source=open(sourcefile,O_RDONLY|O_RSYNC );
+				if (source) {
+					lseek(source,0,SEEK_SET);
+					read(source,&textbuffer,1);
+					close(source);
+				}
+				source=open(sourcefile,O_RDONLY|O_RSYNC );
+				if (source) {
+					lseek(source,-blocksize,SEEK_END);
+					read(source,&textbuffer,1);
+					close(source);
+				}
+				if (wantabort) break;
+			}
 			source=open(sourcefile,O_RDONLY );
 			if (source==-1) {
 				perror("\nError reopening sourcefile after read error");
