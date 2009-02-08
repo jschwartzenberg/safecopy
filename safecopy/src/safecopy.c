@@ -15,10 +15,11 @@
 #include "arglist.h"
 
 #define MAXBLOCKSIZE 1048576
-#define BLOCKSIZE 512
-#define RESOLUTION 1
+#define BLOCKSIZE 4096
+#define RESOLUTION 512
 #define RETRIES 3
 #define SEEKS 1
+#define LOWLEVELMODE 1
 
 #define VERY_FAST 100
 #define FAST VERY_FAST*100
@@ -57,6 +58,20 @@ void usage(char * name) {
 	fprintf(stderr,"	              That takes time, creates additional strain and might\n");
 	fprintf(stderr,"	              not be supported by all devices or drivers.\n");
 	fprintf(stderr,"	              Default: %i\n",SEEKS);
+	fprintf(stderr,"	-L <mode> : Use lowlevel device calls as specified:\n");
+	fprintf(stderr,"	                   0  Do not use lowlevel device calls\n");
+	fprintf(stderr,"	                   1  Use lowlevel device calls,\n");
+	fprintf(stderr,"	                      on retry attempts after errors.\n");
+	fprintf(stderr,"	                   2  Always use lowlevel device calls,\n");
+	fprintf(stderr,"	                      Warning: This would attempt a\n");
+	fprintf(stderr,"	                      device/bus reset on every block read!\n");
+	fprintf(stderr,"	            Supported low level features in this version are:\n");
+	fprintf(stderr,"	                SYSTEM  DEVICE TYPE   FEATURE\n");
+	fprintf(stderr,"	                linux   cdrom/dvd     drive reset (if root)\n");
+	fprintf(stderr,"	                linux   cdrom/dvd     read sector in raw mode\n");
+	fprintf(stderr,"	                linux   floppy        drive reset\n");
+	fprintf(stderr,"	            Default: %i\n",LOWLEVELMODE);
+	fprintf(stderr,"	--sync : Use synchronized read calls (disable buffering)\n");
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
 	fprintf(stderr,"	              Default: block 0\n");
@@ -242,9 +257,9 @@ int main(int argc, char ** argv) {
 	char *marker;
 	// several local integer variables
 	int blocksize,iblocksize,xblocksize,resolution,retries,seeks,cseeks;
-	int incremental,excluding;
+	int incremental,excluding,lowlevel,syncmode;
 	int counter,percent,oldpercent,newerror,newsofterror;
-	int backtracemode,output,linewidth,seekable;
+	int backtracemode,output,linewidth,seekable,desperate;
 	int human=0;
 
 	// error indicators and flags
@@ -268,10 +283,12 @@ int main(int argc, char ** argv) {
 	carglist=arglist_new(argc,argv);
 	arglist_addarg (carglist,"--help",0);
 	arglist_addarg (carglist,"-h",0);
+	arglist_addarg (carglist,"--sync",0);
 	arglist_addarg (carglist,"-b",1);
 	arglist_addarg (carglist,"-r",1);
 	arglist_addarg (carglist,"-R",1);
 	arglist_addarg (carglist,"-s",1);
+	arglist_addarg (carglist,"-L",1);
 	arglist_addarg (carglist,"-l",1);
 	arglist_addarg (carglist,"-o",1);
 	arglist_addarg (carglist,"-I",1);
@@ -294,7 +311,22 @@ int main(int argc, char ** argv) {
 	}
 	sourcefile=arglist_parameter(carglist,"VOIDARGS",0);
 	destfile=arglist_parameter(carglist,"VOIDARGS",1);
-	
+
+	// low level calls enabled?
+	lowlevel=LOWLEVELMODE;
+	if (arglist_arggiven(carglist,"-L")==0) {
+		lowlevel=arglist_integer(arglist_parameter(carglist,"-L",0));
+	}
+	if (lowlevel<0) lowlevel=0;
+	if (lowlevel>2) lowlevel=2;
+	fprintf(stdout,"Low level device calls enabled mode: %i\n",lowlevel);
+
+	syncmode=0;
+	if (arglist_arggiven(carglist,"--sync")==0) {
+		fprintf(stdout,"Using synchronized IO on source.\n");
+		syncmode=O_RSYNC;
+	}
+
 	// find out source file size and block size
 	filesize=0;
 	blocksize=BLOCKSIZE;
@@ -317,7 +349,7 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"File size: %llu\n",filesize);
 	} else {
 		fprintf(stderr,"Filesize not reported by stat(), trying seek().\n");
-		source=open(sourcefile,O_RDONLY);
+		source=open(sourcefile,O_RDONLY | syncmode);
 		if (source) {
 			filesize=lseek(source,0,SEEK_END);
 			close(source);
@@ -433,7 +465,7 @@ int main(int argc, char ** argv) {
 		
 	//open files
 	fprintf(stdout,"Source: %s\nDestination: %s\n",sourcefile,destfile);
-	source=open(sourcefile,O_RDONLY | O_NONBLOCK );
+	source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 	if (source==-1) {
 		fprintf(stderr,"Error opening sourcefile: %s",sourcefile);
 		perror("");
@@ -543,6 +575,7 @@ int main(int argc, char ** argv) {
 	linewidth=0;
 	sposition=0;
 	seekable=1;
+	desperate=0;
 
 	// attempt to seek to start position to find out wether source file is seekable
 	cposition=lseek(source,startoffset,SEEK_SET);
@@ -554,7 +587,7 @@ int main(int argc, char ** argv) {
 		if (cposition>=0) {
 			sposition=cposition;
 		}
-		source=open(sourcefile,O_RDONLY );
+		source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode);
 		if (source==-1) {
 			perror("Error reopening sourcefile after external seek");
 			close(destination);
@@ -684,7 +717,7 @@ int main(int argc, char ** argv) {
 							break;
 						}
 						// reopen input file
-						source=open(sourcefile,O_RDONLY );
+						source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 						if (source==-1) {
 							perror("\nError reopening sourcefile after external seek");
 							close(destination);
@@ -728,6 +761,7 @@ int main(int argc, char ** argv) {
 			FD_SET(source,&efds);
 			select(source+1,&rfds,NULL,&efds,&newtime);
 			if (! ( FD_ISSET(source,&rfds))) {
+				desperate=1;
 				if (human) {
 					if (filesize) {
 						printpercentage(percent);
@@ -739,7 +773,13 @@ int main(int argc, char ** argv) {
 		} while (! ( FD_ISSET(source,&rfds) || FD_ISSET(source,&efds)));
 		if (wantabort) break;
 		// read input data
-		block=read(source,databuffer,remain);
+		if (lowlevel==0 || (lowlevel==1 && !desperate)) {
+			block=read(source,databuffer,remain);
+		} else {
+			//desperate mode means we are allowed to use low lvl 
+			//IO syscalls to work around read errors
+			block=read_desperately(sourcefile,&source,databuffer,sposition,remain,seekable);
+		}
 		// time reading for quality calculation
 		gettimeofday(&newtime,NULL);
 		elapsed=timediff(oldtime,newtime);
@@ -817,6 +857,9 @@ int main(int argc, char ** argv) {
 				}
 				
 			} else {
+				//disable desperate mode (use normal high lvl IO)
+				desperate=0;
+				newerror=retries;
 				if (block<remain) {
 					// not all data we wanted got read, note that
 					write(1,&"_",1);
@@ -877,8 +920,10 @@ int main(int argc, char ** argv) {
 				}
 			}
 		} else if (block<0) {
-			// write operation failed
+			// operation failed
 			counter=1;
+			// use low level IO for error correction if allowed
+			desperate=1;
 			if (remain > resolution && newerror>0) {
 				// start of a new erroneous area - decrease readsize in
 				// case we can read partial data from the beginning
@@ -1020,7 +1065,7 @@ int main(int argc, char ** argv) {
 				}
 				if (wantabort) break;
 			}
-			source=open(sourcefile,O_RDONLY );
+			source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 			if (source==-1) {
 				perror("\nError reopening sourcefile after read error");
 				close(destination);
