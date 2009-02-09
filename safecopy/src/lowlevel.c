@@ -2,8 +2,8 @@
 // make off_t a 64 bit pointer on system that support it
 
 #ifndef __linux__
-// if we don't have linux, th used ioctrls will be different
-// use a dummy read function that always fails
+// if we don't have linux, the used ioctrls will be different
+// use a dummy read function that uses high lvl operations
 size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 			off_t position, size_t length,
 			int seekable) {
@@ -36,7 +36,7 @@ int is_floppy(int fd) {
 //--------------end of floppy stuff -----------------
 
 
-//---------------CD READING -------------------------
+//---------------CD/DVD READING ---------------------
 // is_cd does a drive reset to test if the device is a cd drive
 int is_cd(int fd) {
 	// attempt a cdrom drive reset, return true if succesfull
@@ -73,23 +73,23 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 	off_t lba=position/CD_FRAMESIZE;
 	off_t extra=position-(lba*CD_FRAMESIZE);
 	size_t xlength=CD_FRAMESIZE-extra;
+
 	if (xlength>length) xlength=length;
 	lba_to_msf(lba,msf);
-
 	if (ioctl(fd, CDROMREADRAW, msf) == -1) {
 		return -1;
 	}
 
-	// TODO: read parity and LEC data and check for read errors
+	// TODO: read parity and LEC data and check for possible read errors
 	
 	//each physical cd sector has 12 bytes "sector lead in thingy"
 	//and 4 bytes address (maybe one could really confuse cdrom drives
-	//by putting a very similar structure within user data)
+	//by putting a very similar structure within user data?)
 	memcpy(buffer,(blockbuffer+extra+12+4),xlength);
 	return xlength;
 
 }
-//--------------end of cd stuff ---------------------
+//--------------end of CD/DVD stuff -----------------
 
 // tries to perform a low level read operation on a device
 // it should already be seeked to the right position for normal read()

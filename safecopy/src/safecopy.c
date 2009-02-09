@@ -16,7 +16,6 @@
 
 #define MAXBLOCKSIZE 1048576
 #define BLOCKSIZE 4096
-#define RESOLUTION 512
 #define RETRIES 3
 #define SEEKS 1
 #define LOWLEVELMODE 1
@@ -37,20 +36,27 @@ void usage(char * name) {
 	fprintf(stderr,"Safecopy "VERSION" by CorvusCorax\n");
 	fprintf(stderr,"Usage: %s [options] <source> <target>\n",name);
 	fprintf(stderr,"Options:\n");
-	fprintf(stderr,"	-b <bytes> : Blocksize in bytes, also used as skipping offset\n");
-	fprintf(stderr,"	             when searching for the end of a bad area.\n");
+	fprintf(stderr,"	-b <bytes> : Blocksize in bytes for default read operations.\n");
 	fprintf(stderr,"	             Set this to the physical sectorsize of your media.\n");
-	fprintf(stderr,"	             Default: Blocksize of input device, if determinable,\n");
-	fprintf(stderr,"	                      otherwise %i\n",BLOCKSIZE);
+	fprintf(stderr,"	             Default: Driver blocksize of input device,\n");
+	fprintf(stderr,"	                      if determinable, otherwise %i\n",BLOCKSIZE);
+	fprintf(stderr,"	-f <bytes> : Blocksize in bytes when skipping over badblocks.\n");
+	fprintf(stderr,"	             Higher settings put less strain on your hardware,\n");
+	fprintf(stderr,"	             But you might miss good areas in between two bad ones.\n");
+	fprintf(stderr,"	             Default: Blocksize as in -b times 16\n");
 	fprintf(stderr,"	-r <bytes> : Resolution in bytes when searching for the exact\n");
 	fprintf(stderr,"	             beginning or end of a bad area.\n");
+	fprintf(stderr,"	             If you read data directly from a device there is no\n");
+	fprintf(stderr,"	             need to set this lower than the hardware blocksize.\n");
+	fprintf(stderr,"	             On mounted filesystems however, read blocks\n");
+	fprintf(stderr,"	             and physical blocks could be misaligned.\n");
 	fprintf(stderr,"	             Smaller values lead to very thorough attempts to read\n");
 	fprintf(stderr,"	             data at the edge of damaged areas,\n");
 	fprintf(stderr,"	             but increase the strain on the damaged media.\n");
-	fprintf(stderr,"	             Default: %i\n",RESOLUTION);
+	fprintf(stderr,"	             Default: Blocksize as in -b\n");
 	fprintf(stderr,"	-R <number> : At least that many read attempts are made on the first\n");
 	fprintf(stderr,"	              bad block of a damaged area with minimum resolution.\n");
-	fprintf(stderr,"	              Higher values can sometimes recover a weak sector,\n");
+	fprintf(stderr,"	              More retries can sometimes recover a weak sector,\n");
 	fprintf(stderr,"	              but at the cost of additional strain.\n");
 	fprintf(stderr,"	              Default: %i\n",RETRIES);
 	fprintf(stderr,"	-Z <number> : On each error, force seek the read head from start to\n");
@@ -61,7 +67,7 @@ void usage(char * name) {
 	fprintf(stderr,"	-L <mode> : Use lowlevel device calls as specified:\n");
 	fprintf(stderr,"	                   0  Do not use lowlevel device calls\n");
 	fprintf(stderr,"	                   1  Use lowlevel device calls,\n");
-	fprintf(stderr,"	                      on retry attempts after errors.\n");
+	fprintf(stderr,"	                      on retry attempts after errors only.\n");
 	fprintf(stderr,"	                   2  Always use lowlevel device calls,\n");
 	fprintf(stderr,"	                      Warning: This would attempt a\n");
 	fprintf(stderr,"	                      device/bus reset on every block read!\n");
@@ -71,7 +77,7 @@ void usage(char * name) {
 	fprintf(stderr,"	                linux   cdrom/dvd     read sector in raw mode\n");
 	fprintf(stderr,"	                linux   floppy        drive reset\n");
 	fprintf(stderr,"	            Default: %i\n",LOWLEVELMODE);
-	fprintf(stderr,"	--sync : Use synchronized read calls (disable buffering)\n");
+	fprintf(stderr,"	--sync : Use synchronized read calls (disable read buffering)\n");
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
 	fprintf(stderr,"	              Default: block 0\n");
@@ -256,7 +262,8 @@ int main(int argc, char ** argv) {
 	// pointer to marker string
 	char *marker;
 	// several local integer variables
-	int blocksize,iblocksize,xblocksize,resolution,retries,seeks,cseeks;
+	int blocksize,iblocksize,xblocksize,faultblocksize;
+	int resolution,retries,seeks,cseeks;
 	int incremental,excluding,lowlevel,syncmode;
 	int counter,percent,oldpercent,newerror,newsofterror;
 	int backtracemode,output,linewidth,seekable,desperate;
@@ -285,6 +292,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-h",0);
 	arglist_addarg (carglist,"--sync",0);
 	arglist_addarg (carglist,"-b",1);
+	arglist_addarg (carglist,"-f",1);
 	arglist_addarg (carglist,"-r",1);
 	arglist_addarg (carglist,"-R",1);
 	arglist_addarg (carglist,"-s",1);
@@ -362,13 +370,21 @@ int main(int argc, char ** argv) {
 		}
 	}
 	
-	resolution=RESOLUTION;
+	resolution=blocksize;
 	if (arglist_arggiven(carglist,"-r")==0) {
 		resolution=arglist_integer(arglist_parameter(carglist,"-r",0));
 	}
-	if (resolution<1) resolution=RESOLUTION;
+	if (resolution<1) resolution=1;
 	if (resolution>blocksize) resolution=blocksize;
 	fprintf(stdout,"Resolution: %u\n",resolution);
+
+	faultblocksize=blocksize*16;
+	if (arglist_arggiven(carglist,"-r")==0) {
+		faultblocksize=arglist_integer(arglist_parameter(carglist,"-r",0));
+	}
+	if (faultblocksize<resolution) faultblocksize=resolution;
+	if (faultblocksize>MAXBLOCKSIZE) faultblocksize=MAXBLOCKSIZE;
+	fprintf(stdout,"Fault skip blocksize: %u\n",faultblocksize);
 	
 	retries=RETRIES;
 	if (arglist_arggiven(carglist,"-R")==0) {
@@ -681,7 +697,12 @@ int main(int argc, char ** argv) {
 					}
 				}
 				// make sure any misalignment to block boundaries get corrected asap
-				remain=((((readposition/blocksize)+1)*blocksize)-readposition);
+				// be sure to use skipping size when in bad area
+				if (newerror==0) {
+					remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
+				} else {
+					remain=(((readposition/blocksize)*blocksize)+blocksize)-readposition;
+				}
 			} while (excluding && tmp_pos==lastxblock);
 			// break from above jumps here, with remain=0
 		}
@@ -842,6 +863,25 @@ int main(int argc, char ** argv) {
 					linewidth++;
 					backtracemode=1;
 				} else {
+					if (bblocksoutfile!=NULL) {
+						// write badblocks to file if requested
+						// start at first bad block in current bad set
+						tmp_pos=((lastgood+startoffset)/blocksize);
+						// override that with the first not yet written one
+						if (lastbadblock>=tmp_pos) {
+							tmp_pos=lastbadblock+1;
+						}
+						// then write all blocks that are smaller than the current one
+						// note the different calculation that takes into account wether
+						// the current block STARTS in a error but is ok here 
+						// (which wouldnt be the case if we compared tmp_pos directly)
+						while ((tmp_pos*blocksize)<(readposition+startoffset)) {
+							lastbadblock=tmp_pos;
+							sprintf(textbuffer,"%llu\n",lastbadblock);
+							write(bblocksout,textbuffer,strlen(textbuffer));
+							tmp_pos++;
+						}
+					}
 					newerror=retries;
 					remain=0;
 					tmp_pos=readposition/blocksize;
@@ -957,7 +997,7 @@ int main(int argc, char ** argv) {
 						linewidth+=strlen(textbuffer);
 						// and we set the read size high enough to go over the damaged area quickly
 						// (next block boundary)
-						remain=((((readposition/blocksize)+1)*blocksize)-readposition);
+						remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
 						lastgood=readposition;
 					} 
 
@@ -968,13 +1008,21 @@ int main(int argc, char ** argv) {
 						linewidth++;
 						if (bblocksoutfile!=NULL) {
 							// write badblocks to file if requested
-							tmp_pos=((readposition+startoffset)/blocksize);
-							if (tmp_pos>lastbadblock) {
+							// start at first bad block in current bad set
+							tmp_pos=((lastgood+startoffset)/blocksize);
+							// override that with the first not yet written one
+							if (lastbadblock>=tmp_pos) {
+								tmp_pos=lastbadblock+1;
+							}
+							// then write all blocks that are not higher than the current one
+							// note that HERE we compare blocks, not positions since a block
+							// is bad if ANY part of it is bad
+							while (tmp_pos<=((readposition+startoffset)/blocksize)) {
 								lastbadblock=tmp_pos;
 								sprintf(textbuffer,"%llu\n",lastbadblock);
 								write(bblocksout,textbuffer,strlen(textbuffer));
+								tmp_pos++;
 							}
-							
 						}
 					}
 
