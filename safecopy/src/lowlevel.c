@@ -51,13 +51,13 @@ int is_cd(int fd) {
 void lba_to_msf( off_t lba, struct cdrom_msf * msf) {
 	//lba= (((msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0) * CD_FRAMES + msf->cdmsf_frame0 ) - CD_MSF_OFFSET;
 	lba=lba+CD_MSF_OFFSET;
-	//lba= ((msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0) * CD_FRAMES + msf->cdmsf_frame0;
+	//lba'= ((msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0) * CD_FRAMES + msf->cdmsf_frame0;
 	msf->cdmsf_frame0=lba % CD_FRAMES;
 	lba=lba/CD_FRAMES;
-	//lba= (msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0;
+	//lba''= (msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0;
 	msf->cdmsf_sec0=lba % CD_SECS;
 	msf->cdmsf_min0=lba/CD_SECS;
-	//lba= msf->cdmsf_min0;
+	//lba'''= msf->cdmsf_min0;
 }
 // read raw mode sector from a cd
 size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length) {
