@@ -232,10 +232,6 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 	return (old+(blocksize*WEXITSTATUS(status)));
 }
 
-off_t lseek_dummy(int a,int b, int c) {
-	return -1;
-}
-
 // main
 int main(int argc, char ** argv) {
 
@@ -473,7 +469,11 @@ int main(int argc, char ** argv) {
 		filesize=startoffset+length;
 	}
 
-	databuffer=(char*)malloc((blocksize+1024)*sizeof(char));
+	if (blocksize>=faultblocksize) {
+		databuffer=(char*)malloc((blocksize+1)*sizeof(char));
+	} else {
+		databuffer=(char*)malloc((faultblocksize+1)*sizeof(char));
+	}
 	if (databuffer==NULL) {
 		perror("MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER");
 		return 2;
