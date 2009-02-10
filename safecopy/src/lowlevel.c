@@ -26,11 +26,11 @@ size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 //--------------floppy-------------------------------
 int is_floppy(int fd) {
 	// attempt a drive reset, return true if succesfull
-	if (ioctl(fd,FDRESET)>=0) {
+	if (ioctl(fd,FDRESET,FD_RESET_ALWAYS)>=0) {
 		return 1;
 	}
 	// or at least supported (a "real" reset fails if not root)
-	if (errno!=ENOTTY) return 1;
+	if (errno==EACCES || errno==EPERM) return 1;
 	return 0;
 }
 //--------------end of floppy stuff -----------------
@@ -44,7 +44,7 @@ int is_cd(int fd) {
 		return 1;
 	}
 	// or at least supported (a "real" reset fails if not root)
-	if (errno!=ENOTTY) return 1;
+	if (errno==EACCES || errno==EPERM) return 1;
 	return 0;
 }
 // helper function to calculate a cd sector position

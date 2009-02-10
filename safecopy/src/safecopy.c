@@ -64,18 +64,18 @@ void usage(char * name) {
 	fprintf(stderr,"	              That takes time, creates additional strain and might\n");
 	fprintf(stderr,"	              not be supported by all devices or drivers.\n");
 	fprintf(stderr,"	              Default: %i\n",SEEKS);
-	fprintf(stderr,"	-L <mode> : Use lowlevel device calls as specified:\n");
-	fprintf(stderr,"	                   0  Do not use lowlevel device calls\n");
-	fprintf(stderr,"	                   1  Use lowlevel device calls,\n");
+	fprintf(stderr,"	-L <mode> : Use low level device calls as specified:\n");
+	fprintf(stderr,"	                   0  Do not use low level device calls\n");
+	fprintf(stderr,"	                   1  Use low level device calls,\n");
 	fprintf(stderr,"	                      on retry attempts after errors only.\n");
-	fprintf(stderr,"	                   2  Always use lowlevel device calls,\n");
+	fprintf(stderr,"	                   2  Always use low level device calls,\n");
 	fprintf(stderr,"	                      Warning: This would attempt a\n");
 	fprintf(stderr,"	                      device/bus reset on every block read!\n");
 	fprintf(stderr,"	            Supported low level features in this version are:\n");
 	fprintf(stderr,"	                SYSTEM  DEVICE TYPE   FEATURE\n");
-	fprintf(stderr,"	                linux   cdrom/dvd     drive reset (if root)\n");
-	fprintf(stderr,"	                linux   cdrom/dvd     read sector in raw mode\n");
-	fprintf(stderr,"	                linux   floppy        drive reset\n");
+	fprintf(stderr,"	                Linux   cdrom/dvd     drive reset (if root)\n");
+	fprintf(stderr,"	                Linux   cdrom/dvd     read sector in raw mode\n");
+	fprintf(stderr,"	                Linux   floppy        controller reset\n");
 	fprintf(stderr,"	            Default: %i\n",LOWLEVELMODE);
 	fprintf(stderr,"	--sync : Use synchronized read calls (disable read buffering)\n");
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
@@ -379,8 +379,8 @@ int main(int argc, char ** argv) {
 	fprintf(stdout,"Resolution: %u\n",resolution);
 
 	faultblocksize=blocksize*16;
-	if (arglist_arggiven(carglist,"-r")==0) {
-		faultblocksize=arglist_integer(arglist_parameter(carglist,"-r",0));
+	if (arglist_arggiven(carglist,"-f")==0) {
+		faultblocksize=arglist_integer(arglist_parameter(carglist,"-f",0));
 	}
 	if (faultblocksize<resolution) faultblocksize=resolution;
 	if (faultblocksize>MAXBLOCKSIZE) faultblocksize=MAXBLOCKSIZE;
