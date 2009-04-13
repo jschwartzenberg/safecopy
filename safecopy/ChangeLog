@@ -26,3 +26,9 @@
 - Added low level IO layer to bypass driver functions on some devices
 - Changed the logic to skip over bad areas to be independent of hw block sizes
 - Documentation updated
+
+2009.04.13:
+- Fixed disk detection on CD / DVD drives
+- Correct sector address calculation in raw mode acces on different types of CDs
+- Floppy low level IO now supports twaddle syscall
+- Man page added to documentation
