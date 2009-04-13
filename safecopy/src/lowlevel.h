@@ -6,5 +6,5 @@
 // return<0: error. the device will be open but in undefined condition
 size_t read_deperately(char* filename, int *fd, unsigned char* buffer,
 			off_t position, size_t length,
-			int seekable);
+			int seekable, int recovery, int syncmode);
 

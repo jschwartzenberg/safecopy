@@ -1,3 +1,27 @@
+//sorry for this file being one big long unreadable mess
+//the main operation loop actually sits in main()
+//basically processing the following sequence
+// 1.declarations
+// 2.command line parsing
+// 3.opening io handles
+// 4.initialisations
+// 5.dynamic initialisations and tests
+// 6.main io loop
+// 6.a planning - calculate wanted read position based on include/exclude input files
+// 6.b navigation - attempt to seek to requested input file position and find out actual position
+// 6.c patience - wait for availability of data
+// 6.d input - attempt to read from sourcefile
+// 6.e feedback - calculate and display user feedback information
+// 6.f reaction - act according to result of read operation
+// 6.f.1 succesfull read:
+// 6.f.1.a attempt to backtrack for readable data prior to current position or...
+// 6.f.1.b write to output data file
+// 6.f.2 failed read
+// 6.f.2.a try again or...
+// 6.f.2.b skip over bad area
+// 6.f.2.c close and reopen source file
+// 7.closing and finalisation
+
 #define _FILE_OFFSET_BITS 64
 // make off_t a 64 bit pointer on system that support it
 
@@ -66,18 +90,18 @@ void usage(char * name) {
 	fprintf(stderr,"	              Default: %i\n",SEEKS);
 	fprintf(stderr,"	-L <mode> : Use low level device calls as specified:\n");
 	fprintf(stderr,"	                   0  Do not use low level device calls\n");
-	fprintf(stderr,"	                   1  Use low level device calls,\n");
-	fprintf(stderr,"	                      on retry attempts after errors only.\n");
-	fprintf(stderr,"	                   2  Always use low level device calls,\n");
-	fprintf(stderr,"	                      Warning: This would attempt a\n");
-	fprintf(stderr,"	                      device/bus reset on every block read!\n");
+	fprintf(stderr,"	                   1  Attempt low level device calls\n");
+	fprintf(stderr,"	                      for error recovery only\n");
+	fprintf(stderr,"	                   2  Always use low level device calls\n");
+	fprintf(stderr,"	                      if available\n");
 	fprintf(stderr,"	            Supported low level features in this version are:\n");
 	fprintf(stderr,"	                SYSTEM  DEVICE TYPE   FEATURE\n");
-	fprintf(stderr,"	                Linux   cdrom/dvd     drive reset (if root)\n");
-	fprintf(stderr,"	                Linux   cdrom/dvd     read sector in raw mode\n");
-	fprintf(stderr,"	                Linux   floppy        controller reset\n");
+	fprintf(stderr,"	                Linux   cdrom/dvd     bus/device reset\n");
+	fprintf(stderr,"	                Linux   cdrom         read sector in raw mode\n");
+	fprintf(stderr,"	                Linux   floppy        controller reset, twaddle\n");
 	fprintf(stderr,"	            Default: %i\n",LOWLEVELMODE);
-	fprintf(stderr,"	--sync : Use synchronized read calls (disable read buffering)\n");
+	fprintf(stderr,"	--sync : Use synchronized read calls (disable driver buffering)\n");
+	fprintf(stderr,"	         Default: Asynchronous read buffering by the OS is allowed\n");
 	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
 	fprintf(stderr,"	              Default: block 0\n");
@@ -235,6 +259,7 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 // main
 int main(int argc, char ** argv) {
 
+// 1.declarations
 	// commandline argument handler class
 	struct arglist *carglist;
 	// filenames
@@ -263,6 +288,7 @@ int main(int argc, char ** argv) {
 	int incremental,excluding,lowlevel,syncmode;
 	int counter,percent,oldpercent,newerror,newsofterror;
 	int backtracemode,output,linewidth,seekable,desperate;
+	// indicator wether stdin/stderr is a terminal - affects output
 	int human=0;
 
 	// error indicators and flags
@@ -281,6 +307,8 @@ int main(int argc, char ** argv) {
 	long int elapsed,oldelapsed,oldcategory;
 	// select() needs these
 	fd_set rfds,efds;
+
+// 2.command line parsing
 
 	// parse all commandline arguments
 	carglist=arglist_new(argc,argv);
@@ -303,6 +331,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-Z",1);
 	arglist_addarg (carglist,"-M",1);
 
+	// find out wether the user is wetware
 	human=(isatty(1) & isatty(2));
 	
 	if ((arglist_arggiven(carglist,"--help")==0)
@@ -325,6 +354,7 @@ int main(int argc, char ** argv) {
 	if (lowlevel>2) lowlevel=2;
 	fprintf(stdout,"Low level device calls enabled mode: %i\n",lowlevel);
 
+	// synchronous IO
 	syncmode=0;
 	if (arglist_arggiven(carglist,"--sync")==0) {
 		fprintf(stdout,"Using synchronized IO on source.\n");
@@ -478,6 +508,8 @@ int main(int argc, char ** argv) {
 		perror("MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER");
 		return 2;
 	}
+
+// 3.opening io handles
 		
 	//open files
 	fprintf(stdout,"Source: %s\nDestination: %s\n",sourcefile,destfile);
@@ -561,37 +593,43 @@ int main(int argc, char ** argv) {
 		}
 	}
 
+// 4.initialisations
+
 	// setting signal handler
 	signal(SIGINT, signalhandler);
 
 	// initialise all vars
-	readposition=0;
-	writeposition=0;
-	block=-1;
-	remain=0;
-	writeremain=0;
-	softerr=0;
-	harderr=0;
-	counter=1;
-	newerror=retries;
-	newsofterror=0;
-	lasterror=0;
-	lastgood=0;
-	lastbadblock=-1;
-	lastxblock=-1;
-	lastsourceblock=-1;
-	damagesize=0;
-	backtracemode=0;
-	percent=-1;
-	oldpercent=-1;
-	oldelapsed=0;
+	readposition=0;	//current wanted reading position in sourcefile relative to startoffset
+	writeposition=0; //current writing position in destination file
+	block=-1; //amount of bytes read from the current reading position, negative values indicate errors
+	remain=0; //remainder if a read operation read less than blocksize bytes
+	writeremain=0; //remainder if a write operation wrote less than blocksize bytes
+	softerr=0; //counter for recovered read errors
+	harderr=0; //counter for unrecoverable read errors
+	counter=1; //counter for visual output - a dot is printed all 1024 blocks
+	newerror=retries; //counter for repeated read attempts on the current block - zero indicates
+		//we are currently dealing with an unrecoverable error and need to find the end of the bad area
+	newsofterror=0; //flag that indicates previous read failures on the current block
+	lasterror=0; //address of the last encountered bad area in source file
+	lastgood=0; //address of the last encountered succesfull read in source file
+	lastbadblock=-1; //most recently encountered block for output badblock file
+	lastxblock=-1; //most recently encountered block number from input exclude file
+	lastsourceblock=-1; //most recently encountered block number from input badblock file
+	damagesize=0; //counter for size of unreadable source file data
+	backtracemode=0; //flag that indicates safecopy is searching for the end of a bad area
+	percent=-1; //current progress status, relative to source file size
+	oldpercent=-1; //previously output percentage, needed to indicate required updates
+	oldelapsed=0; //recent average time period for reading one block
 	oldcategory=timecategory(oldelapsed);
-	elapsed=0;
-	output=0;
-	linewidth=0;
-	sposition=0;
-	seekable=1;
-	desperate=0;
+		//timecategories translate raw milliseconds into human readable classes
+	elapsed=0; //time elapsed while reading the current block
+	output=0; //flag indicating that output (smily, percentage, ...) needs to be updated
+	linewidth=0; //counter for x position in text output on terminal
+	sposition=0; //actual file pointer position in sourcefile
+	seekable=1; //flag that sourcefile allows seeking
+	desperate=0; //flag set to indicate required low level source device access
+
+// 5.dynamic initialisations and tests
 
 	// attempt to seek to start position to find out wether source file is seekable
 	cposition=lseek(source,startoffset,SEEK_SET);
@@ -619,10 +657,14 @@ int main(int argc, char ** argv) {
 		seekable=1;
 	}
 	
+// 6.main io loop
+
 	fflush(stdout);
 	fflush(stderr);
 	// main data loop. Continue until all data has been read or CTRL+C has been pressed
 	while (!wantabort && block!=0 && (readposition<length || length<0)) {
+
+// 6.a planning - calculate wanted read position based on include/exclude input files
 
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
@@ -707,6 +749,7 @@ int main(int argc, char ** argv) {
 			// break from above jumps here, with remain=0
 		}
 
+// 6.b navigation - attempt to seek to requested input file position and find out actual position
 
 		// seek and read - timed
 		gettimeofday(&oldtime,NULL);
@@ -772,6 +815,8 @@ int main(int argc, char ** argv) {
 			percent=(100*(readposition))/(filesize-startoffset);
 		}
 
+// 6.c patience - wait for availability of data
+
 		// select for reading. Have a fallback output in case of timeout.
 		do {
 			newtime.tv_sec=10;
@@ -793,17 +838,20 @@ int main(int argc, char ** argv) {
 			if (wantabort) break;
 		} while (! ( FD_ISSET(source,&rfds) || FD_ISSET(source,&efds)));
 		if (wantabort) break;
+// 6.d input - attempt to read from sourcefile
 		// read input data
 		if (lowlevel==0 || (lowlevel==1 && !desperate)) {
 			block=read(source,databuffer,remain);
 		} else {
 			//desperate mode means we are allowed to use low lvl 
 			//IO syscalls to work around read errors
-			block=read_desperately(sourcefile,&source,databuffer,sposition,remain,seekable);
+			block=read_desperately(sourcefile,&source,databuffer,sposition,remain,seekable,desperate,syncmode);
 		}
 		// time reading for quality calculation
 		gettimeofday(&newtime,NULL);
 		elapsed=timediff(oldtime,newtime);
+
+// 6.e feedback - calculate and display user feedback information
 
 		// smooth times, react sensitive to high times
 		if (timecategory(elapsed)>timecategory(oldelapsed)) {
@@ -835,13 +883,15 @@ int main(int argc, char ** argv) {
 		if (linewidth>40) {
 			if (human) {
 				tmp_pos=readposition/blocksize;
-				sprintf(textbuffer," [%lli]\n",tmp_pos);
+				sprintf(textbuffer," [%lli]    \n",tmp_pos);
 				write(2,textbuffer,strlen(textbuffer));
 			}
 			linewidth=0;
 		}
 		output=0;
 
+// 6.f processing - react according to result of read operation
+// 6.f.1 succesfull read:
 		if (block>0) {
 			sposition=sposition+block;
 			// successfull read, if happening during soft recovery
@@ -852,6 +902,7 @@ int main(int argc, char ** argv) {
 			}
 			// read successfull, test for end of damaged area
 			if (newerror==0) {
+// 6.f.1.a attempt to backtrack for readable data prior to current position or...
 				// we are in recovery since we just read past the end of a damaged area
 				// so we go back until the beginning of the readable area is found (if possible)
 
@@ -897,6 +948,7 @@ int main(int argc, char ** argv) {
 				}
 				
 			} else {
+// 6.f.1.b write to output data file
 				//disable desperate mode (use normal high lvl IO)
 				desperate=0;
 				newerror=retries;
@@ -960,10 +1012,12 @@ int main(int argc, char ** argv) {
 				}
 			}
 		} else if (block<0) {
+// 6.f.2 failed read
 			// operation failed
 			counter=1;
 			// use low level IO for error correction if allowed
 			desperate=1;
+// 6.f.2.a try again or...
 			if (remain > resolution && newerror>0) {
 				// start of a new erroneous area - decrease readsize in
 				// case we can read partial data from the beginning
@@ -981,6 +1035,7 @@ int main(int argc, char ** argv) {
 					linewidth++;
 					output=1;
 				} else {
+// 6.f.2.b skip over bad area
 					// readsize is already minimal, out of retry attempts
 					// unrecoverable error, go one sector ahead and try again there 
 
@@ -1095,6 +1150,7 @@ int main(int argc, char ** argv) {
 
 			}
 
+// 6.f.2.c close and reopen source file
 			// reopen source file to clear possible error flags preventing us from getting more data
 			close (source);
 			// do some forced seeks to move head around.
@@ -1130,6 +1186,9 @@ int main(int argc, char ** argv) {
 			}
 		}
 	}
+
+// 7.closing and finalisation
+
 	fflush(stdout);
 	fflush(stderr);
 	if (newerror==0) {

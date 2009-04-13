@@ -6,7 +6,7 @@
 // use a dummy read function that uses high lvl operations
 size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 			off_t position, size_t length,
-			int seekable) {
+			int seekable, int recovery, int syncmode) {
 	size_t retval;
 	retval=read(*fd,buffer,length);
 	return retval;
@@ -14,6 +14,8 @@ size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 #else
 
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <string.h>
@@ -25,28 +27,107 @@ size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 
 //--------------floppy-------------------------------
 int is_floppy(int fd) {
+	static int isfloppy=-1;
+	if (isfloppy!=-1) return isfloppy;
+
 	// attempt a drive reset, return true if succesfull
 	if (ioctl(fd,FDRESET,FD_RESET_ALWAYS)>=0) {
-		return 1;
-	}
+		fprintf(stderr,"\nFloppy low level access: drive reset, twaddle ioctl\n");
+		isfloppy=1;
 	// or at least supported (a "real" reset fails if not root)
-	if (errno==EACCES || errno==EPERM) return 1;
-	return 0;
+	} else if (errno==EACCES || errno==EPERM) {
+		fprintf(stderr,"\nFloppy low level access: twaddle ioctl\n");
+		isfloppy=1;
+	} else {
+		isfloppy=0;
+	}
+	return isfloppy;
+}
+
+void reset_floppy(int fd) {
+	// attempt a drive reset
+	ioctl(fd,FDRESET,FD_RESET_ALWAYS);
+}
+
+void torture_floppy(int fd) {
+	// send the twaddle system call
+	ioctl(fd,FDTWADDLE);
 }
 //--------------end of floppy stuff -----------------
 
 
 //---------------CD/DVD READING ---------------------
-// is_cd does a drive reset to test if the device is a cd drive
+
+int cdromsectorsize=0;
+int cdromsectoroffset=16;
+
+// is_cd queries disc-status
 int is_cd(int fd) {
-	// attempt a cdrom drive reset, return true if succesfull
-	if (ioctl(fd,CDROMRESET)>=0) {
-		return 1;
+	static int iscd=-1;
+	int retval;
+	char* mode;
+	if(iscd!=-1) return iscd;
+	retval=ioctl(fd,CDROM_DISC_STATUS);
+	if (retval>=0) {
+		iscd=1;
+		if (retval==CDS_AUDIO) {
+			cdromsectorsize=2352;
+			cdromsectoroffset=0;
+			mode="audio";
+		} else if (retval==CDS_DATA_1) {
+			mode="Mode1";
+			cdromsectorsize=2048;
+			cdromsectoroffset=16;
+		} else if (retval==CDS_DATA_2) {
+			mode="Mode2";
+			cdromsectorsize=2336;
+			cdromsectoroffset=16;
+		} else if (retval==CDS_XA_2_1) {
+			mode="XA 1";
+			cdromsectorsize=2048;
+			cdromsectoroffset=24;
+		} else if (retval==CDS_XA_2_2) {
+			mode="XA 2";
+			cdromsectorsize=2324;
+			cdromsectoroffset=24;
+		} else if (retval==CDS_MIXED) {
+			fprintf(stderr,"\nCDROM mixed mode - low level access: drive reset\n");
+			cdromsectorsize=0;
+			cdromsectoroffset=0;
+			return 1;
+		} else {
+			fprintf(stderr,"\nCDROM unknown disc - low level access: drive reset\n");
+			cdromsectorsize=0;
+			cdromsectoroffset=0;
+			return 1;
+		}
+		fprintf(stderr,"\nCDROM %s - low level access: drive reset, raw read\nPlease use a devisor of %i as blocksize\n",mode,cdromsectorsize);
+	} else {
+		iscd=0;
 	}
-	// or at least supported (a "real" reset fails if not root)
-	if (errno==EACCES || errno==EPERM) return 1;
-	return 0;
+	return iscd;
 }
+
+// is_dvd queries dvd layer information
+int is_dvd(int fd) {
+	static int isdvd=-1;
+	if(isdvd!=-1) return isdvd;
+	dvd_struct s;
+	s.type=DVD_STRUCT_PHYSICAL;
+	if (ioctl(fd,DVD_READ_STRUCT,&s)>=0) {
+		isdvd=1;
+		fprintf(stderr,"\nDVD low level access: drive reset\n");
+	} else {
+		isdvd=0;
+	}
+	return isdvd;
+}
+
+// issue a drive/bus reset
+void reset_cd(int fd) {
+	ioctl(fd,CDROMRESET);
+}
+
 // helper function to calculate a cd sector position
 void lba_to_msf( off_t lba, struct cdrom_msf * msf) {
 	//lba= (((msf->cdmsf_min0*CD_SECS) + msf->cdmsf_sec0) * CD_FRAMES + msf->cdmsf_frame0 ) - CD_MSF_OFFSET;
@@ -65,14 +146,17 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 	unsigned char blockbuffer[CD_FRAMESIZE_RAWER];
 	struct cdrom_msf *msf=(struct cdrom_msf*)blockbuffer;
 
-	// the calculation silently assumes that the cd read
-	// consists of a single session single data track 
-	// in mode0 or mode1
+	// the calculation silently assumes that the cd
+	// has a consistent sector size and offset all over.
+	// this is not true for mixed mode cds.
 	// TODO: read TOC for cd layout
 	// and fix sector calculation accordingly
-	off_t lba=position/CD_FRAMESIZE;
-	off_t extra=position-(lba*CD_FRAMESIZE);
-	size_t xlength=CD_FRAMESIZE-extra;
+	if (cdromsectorsize==0) {
+		return(read(fd,buffer,length));
+	}
+	off_t lba=position/cdromsectorsize;
+	off_t extra=position-(lba*cdromsectorsize);
+	size_t xlength=cdromsectorsize-extra;
 
 	if (xlength>length) xlength=length;
 	lba_to_msf(lba,msf);
@@ -85,7 +169,8 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 	//each physical cd sector has 12 bytes "sector lead in thingy"
 	//and 4 bytes address (maybe one could really confuse cdrom drives
 	//by putting a very similar structure within user data?)
-	memcpy(buffer,(blockbuffer+extra+12+4),xlength);
+	memcpy(buffer,(blockbuffer+extra+cdromsectoroffset),xlength);
+	lseek(fd,position+xlength,SEEK_SET);
 	return xlength;
 
 }
@@ -99,23 +184,64 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 // return<0: error. the device will be open but in undefined condition
 size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 			off_t position, size_t length,
-			int seekable) {
-	// lets assume it has already been tried to make a normal read.
+			int seekable, int recovery, int syncmode) {
 	size_t retval;
 	
-	if (is_cd(*fd)) {
-		//cdroms have low level io ioctls available for us
-		retval=read_from_cd(*fd,buffer,position,length);
-		if (retval>=0) {
-			lseek(*fd,position+retval,SEEK_SET);
-			return retval;
+	if (is_dvd(*fd)) {
+		//linux dvdrom driver doesn't provide reasonably documented
+		//low level reading syscalls, but we can do a device reset.
+		if (recovery) {
+			reset_cd(*fd);
+			//reopen device after reset
+			close(*fd);
+			*fd=open(filename,O_RDONLY | O_NONBLOCK | syncmode );
+			if (*fd<=0) return -1;
+			lseek(*fd,position,SEEK_SET);
 		}
-	} else if (is_floppy(*fd)) {
-		//we use std read after a drive reset (done by is_floppy)
 		retval=read(*fd,buffer,length);
 		return retval;
+	} else if (is_cd(*fd)) {
+		//cdroms have full scale low level ioctls available for us
+		//however safecopy doesnt support the full redcode standard
+		//and some cheap assumptions are made
+		//regarding the cdrom disk layout
+		//(mode1 single track single session cds only)
+		if (recovery) {
+			reset_cd(*fd);
+			//reopen device after reset
+			close(*fd);
+			*fd=open(filename,O_RDONLY | O_NONBLOCK | syncmode );
+			if (*fd<=0) return -1;
+		}
+		retval=read_from_cd(*fd,buffer,position,length);
+		return retval;
+	} else if (is_floppy(*fd)) {
+		//the linux floppy driver does cracy low level stuff, but
+		//for sanity reasons we support reset and waddle ioctl only
+		if (recovery) {
+			reset_floppy(*fd);
+			//reopen device after reset
+			close(*fd);
+			*fd=open(filename,O_RDONLY | O_NONBLOCK | syncmode );
+			if (*fd<=0) return -1;
+			lseek(*fd,position,SEEK_SET);
+		}
+		retval=read(*fd,buffer,length);
+		if (retval<0 && errno==EIO) {
+			//try again with "twaddle" if failed
+			reset_floppy(*fd);
+			//reopen device after reset
+			close(*fd);
+			*fd=open(filename,O_RDONLY | O_NONBLOCK | syncmode );
+			if (*fd<=0) return -1;
+			lseek(*fd,position,SEEK_SET);
+			//play around with drive engine
+			torture_floppy(*fd);
+			retval=read(*fd,buffer,length);
+		}
+		return retval;
 	} else {
-		// unsupported device, normal read
+		// unsupported or unknown device, attempt a normal read
 		retval=read(*fd,buffer,length);
 		return retval;
 	}

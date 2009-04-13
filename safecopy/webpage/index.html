@@ -14,6 +14,22 @@ safecopy
 <h2>
 safecopy is a data recovery tool which tries to extract as much data as possible from a problematic (i.e. damaged sectors) source - like floppy drives, harddisk partitions, CDs, tape devices, ..., where other tools like dd would fail doe to I/O errors.
 </h2>
+<h3>News:</h3>
+<p>
+2009-04-13:
+<br>
+Fixes in low level data recovery from CDROM and DVD code.
+<br>Raw sector reading is not possible on DVDs, but DVDs had been incorrectly detected as CDs leading to failures on low level access.
+DVDs are now detected succesfully and offer a drive reset as the only low level operation.
+<br>
+The type of a CD (Audio, Mode1, Mode2, etc...) is now sucesfully detected, and sector alignments are calculated correctly. Since its not possible with reasonable overhead to calculate sector addressing on Mixed-mode CDs (since the sector sizes can change with each track) safecopy does not attempt to raw read from these anymore. Device reset will still be attemted if necessary.
+<br>
+Device resets will now only be issued in case of previous read errors.
+<br>
+The "twaddle" system call is now supported on floppy drives to potentially aid in data resurrection.
+<br>
+Safecopy has now a manpage, which includes basically all the information of the README file in more standardized format.
+</p>
 
 <p>
 <a href="http://sourceforge.net/projects/safecopy">Sourceforge Project page</a>
@@ -62,13 +78,15 @@ See the "-S &lt;seekscript&gt;" parameter for details.
 Performance and success of this tool depend extremely on the device driver,
 firmware and underlying hardware.
 
-Currently safecopy supports RAW access to CD/DVD drives to read data directly
-of a CD, bypassing some driver dependant error correction. This can speed up
-data retrieval from CDs and reduce system load during recovery, as well as
-sometimes increase the success rate.  However it makes the silent assumption
-that a CD is written in Mode1, 2048 byte sectors and one session/data track
-only (This applies to more than 99% of all data CDs. Other disks can still be
-recovered using normal high level data access).
+Currently safecopy supports RAW access to CDROM drives to read data directly of
+a CD, bypassing some driver dependant error correction. This can speed up data
+retrieval from CDs and reduce system load during recovery, as well as sometimes
+increase the success rate. Safecopy uses the disc status syscall to determine
+sector size and addressing of CDs. This fails on mixed-mode or multi-session
+CDs, since the sector layout can change within the disk, but would still work
+on the the big majority of disks. Other disks can still be recovered using
+normal high level data access. Safecopy auto-detects the disk type involved
+when first attempting low level access.
 
 Some CD/DVD drives are known to cause the ATAPI bus to crash on errors, causing
 the device driver to freeze for times up to and beyond a minute per error. Try
@@ -254,7 +272,7 @@ FAQ:
 	!!! If the data is really important, go to a professional data recovery
 	!!! specialist right away, before doing further damage to the drive
 
-Safecopy 1.1 by CorvusCorax
+Safecopy 1.2 by CorvusCorax
 Usage: safecopy [options] &lt;source&gt; &lt;target&gt;
 Options:
 	-b &lt;bytes&gt; : Blocksize in bytes for default read operations.
@@ -287,18 +305,18 @@ Options:
 	              Default: 1
 	-L &lt;mode&gt; : Use low level device calls as specified:
 	                   0  Do not use low level device calls
-	                   1  Use low level device calls,
-	                      on retry attempts after errors only.
-	                   2  Always use low level device calls,
-	                      Warning: This would attempt a
-	                      device/bus reset on every block read!
+	                   1  Attempt low level device calls
+	                      for error recovery only
+	                   2  Always use low level device calls
+	                      if available
 	            Supported low level features in this version are:
 	                SYSTEM  DEVICE TYPE   FEATURE
-	                Linux   cdrom/dvd     drive reset (if root)
-	                Linux   cdrom/dvd     read sector in raw mode
-	                Linux   floppy        controller reset
+	                Linux   cdrom/dvd     bus/device reset
+	                Linux   cdrom         read sector in raw mode
+	                Linux   floppy        controller reset, twaddle
 	            Default: 1
-	--sync : Use synchronized read calls (disable read buffering)
+	--sync : Use synchronized read calls (disable driver buffering)
+	         Default: Asynchronous read buffering by the OS is allowed
 	-s &lt;blocks&gt; : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
 	              Default: block 0

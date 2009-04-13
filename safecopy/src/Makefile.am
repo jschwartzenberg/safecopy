@@ -10,3 +10,6 @@ safecopy_SOURCES= \
 	arglist.c arglist.h \
 	lowlevel.c lowlevel.h \
 	safecopy.c
+
+man_MANS = \
+	safecopy.1
