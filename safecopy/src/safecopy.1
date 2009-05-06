@@ -1,4 +1,4 @@
-.TH SAFECOPY 1 2009-04-13 "" "SAFECOPY"
+.TH SAFECOPY 1 2009-05-05 "" "SAFECOPY"
 
 .SH NAME
 .BR safecopy 
@@ -28,7 +28,7 @@ Multiple passes over the same file are possible, to first retrieve as much data
 from a device as possible with minimum harm, and then trying to retrieve some
 of the remaining data with increasingly aggressive read attempts.
 .PP
-For this to work, the source device or file has to be seekable.  For unseekable
+For this to work, the source device or file has to be seekable. For unseekable
 devices (like tapes) you can try to use an external script to execute a
 controlled skip over the damaged part for you.
 .PP
@@ -40,13 +40,13 @@ firmware and underlying hardware.
 .PP
 Currently safecopy supports RAW access to CDROM drives to read data directly of
 a CD, bypassing some driver dependant error correction. This can speed up data
-retrieval from CDs and reduce system load during recovery, as well as sometimes
+retrieval from CDs and reduce system load during recovery, as well as
 increase the success rate. Safecopy uses the disc status syscall to determine
 sector size and addressing of CDs. This fails on mixed-mode or multi-session
 CDs, since the sector layout can change within the disk, but would still work
 on the the big majority of disks. Other disks can still be recovered using
 normal high level data access. Safecopy auto-detects the disk type involved
-when first attempting low level access.
+during scan for disk and block size.
 .PP
 Some CD/DVD drives are known to cause the ATAPI bus to crash on errors, causing
 the device driver to freeze for times up to and beyond a minute per error. Try
@@ -60,19 +60,47 @@ unreadable sectors only.
 
 .SH OPTIONS
 .TP
-\fB\-b\fR <\fIbytes\fR>
-Blocksize in bytes for default read operations.
+\fB\-\-stage1\fR
+Preset to rescue most of the data fast,
+using no retries and avoiding bad areas.
+.IP
+\fBImplies\fR: -f 10% -r 10% -R 1 -Z 0 -L 2 -M BaDbLoCk \\
+.br
+-o stage1.badblocks
+.TP
+\fB\-\-stage2\fR
+Preset to rescue more data, using no retries
+but searching for exact ends of bad areas.
+.IP
+\fBImplies\fR: -f 1% -r 1* -R 1 -Z 0 -L 2 \\
+.br
+-I stage1.badblocks -o stage2.badblocks
+.TP
+\fB\-\-stage3\fR
+Preset to rescue everything that can be rescued
+using maximum retries, head realignment tricks
+and low level access.
+.IP
+\fBImplies\fR: -f 1* -r 1* -R 4 -Z 1 -L 2 \\
+.br
+-I stage2.badblocks -o stage3.badblocks
+.TP
+\fB\-b\fR <\fIsize\fR>
+Blocksize for default read operations.
 Set this to the physical sectorsize of your media.
 .IP
-\fBDefault\fR: Driver blocksize of input device, if determinable, otherwise 4096
+\fBDefault\fR: 1*
+.br
+Hardware block size if reported by OS, otherwise 4096
 .TP
-\fB\-f\fR <\fIbytes\fR>
-Blocksize in bytes when skipping over badblocks.  Higher settings put less
-strain on your hardware, But you might miss good areas in between two bad ones.
+\fB\-f\fR <\fIsize\fR>
+Blocksize in bytes when skipping over badblocks.
+Higher settings put less strain on your hardware,
+but you might miss good areas in between two bad ones.
 .IP
-\fBDefault\fR: Blocksize as in \-b times 16
+\fBDefault\fR: 16*
 .TP
-\fB\-r\fR <\fIbytes\fR>
+\fB\-r\fR <\fIsize\fR>
 Resolution in bytes when searching for the exact beginning or end of a bad
 area.
 If you read data directly from a device there is no need to set this lower than
@@ -81,7 +109,7 @@ physical blocks could be misaligned.
 Smaller values lead to very thorough attempts to read data at the edge of
 damaged areas, but increase the strain on the damaged media.
 .IP
-\fBDefault\fR: Blocksize as in \-b
+\fBDefault\fR: 1*
 .TP
 \fB\-R\fR <\fInumber\fR>
 At least that many read attempts are made on the first bad block of a damaged
@@ -185,6 +213,21 @@ be rescued completely.
 \fB\-h\fR, \fB\-\-help\fR
 Show the program help text.
 
+.SH PARAMETERS
+valid parameters for \fB\-f\fR \fB\-r\fR \fB\-b\fR \fB<size>\fR options are:
+.TP
+\fB<integer>\fR
+Amount in bytes - i.e. 1024
+.TP
+\fB<percentage>%\fR
+Percentage of whole file/device size - e.g. 10%
+.TP
+\fB<number>*\fR
+\fB-b\fR only, number times blocksize reported by OS
+.TP
+\fB<number>*\fR
+\fB-f\fR and \fB-r\fR only, number times the value of \fB-b\fR
+
 .SH OUTPUT
 description of output symbols:
 .TP
@@ -233,15 +276,14 @@ How do I...
 /dev/device ~/diskimage
 .TP
 - resurrect data as thoroughly as possible?
-(assuming a physical block size of 512 bytes)
 .IP
 .B safecopy
-source dest -b 512 -f 512 -r 512 -R 8 -Z 2
+source dest -f 1* -R 8 -Z 2
 .br
 (assuming logical misalignment of blocks to sectors)
 .IP
 .B safecopy
-source dest -b 512 -f 512 -r 1 -R 8 -Z 2
+source dest -f 1* -r 1 -R 8 -Z 2
 .TP
 - resurrect data as fast as possible, or
 .TP
@@ -249,16 +291,26 @@ source dest -b 512 -f 512 -r 1 -R 8 -Z 2
 (you can use even higher values for -f and -r)
 .IP
 .B safecopy
-source dest -f 65536 -r 16384 -R 0 -Z 0
+source dest -f 10% -R 0 -Z 0
 .TP
 - resurrect some data fast, then read more data thoroughly later:
-(assuming a physical sector size of 512 bytes)
 .IP
 .B safecopy
-source dest -b 512 -f 65536 -r 16384 -R 0 -Z 0 -o badblockfile
+source dest -f 10% -R 0 -Z 0 -o badblockfile
 .br
 .B safecopy
-source dest -b 512 -f 512 -r 512 -R 8 -Z 2 -I badblockfile
+source dest -f 1* -R 8 -Z 2 -I badblockfile
+.IP
+.I Alternate approach using the new preset features:
+.IP
+.B safecopy
+source dest --stage1
+.IP
+.B safecopy
+source dest --stage2
+.IP
+.B safecopy
+source dest --stage3
 .TP
 - utilize some friends CD-ROM drives to complete the data from my damaged CD:
 .B safecopy
@@ -295,6 +347,35 @@ source dest -I /dev/null -o badblockfile
 .br
 .B cat
 badblockfile >>savedbadblockfile
+.TP
+- interrupt and resume in incremental mode:
+.br
+(this needs a bit of bash scripting to get the correct badblock lists)
+.br
+.B
+safecopy
+source dest <options> -o badblockfile1
+.br
+.B
+safecopy
+source dest <options> -I badblockfile1 -o badblockfile2
+.br
+.B <CTRL+C>
+(safecopy aborts)
+.br
+latest=$( tail -n 1 badblockfile2 )
+.br
+if [ -z $latest ]; then latest=-1; fi;
+.br
+cat badblockfile1 | while read block; do
+.br
+	[ $block -gt $latest ] && echo $block >>badblockfile2;
+.br
+done;
+.br
+.B
+safecopy
+source dest <options> -I badblockfile2 -o badblockfile3
 .TP
 - find the corrupted files on a partially successful rescued file system:
 .B safecopy
@@ -421,6 +502,9 @@ As a general guideline:
 -Cleaning up CDs helps.
 .br
 -Unless you use chemicals.
+.br
+-Using sticky tape on a CD will rip of the reflective layer permanently
+rendering the disk unreadable.
 .PP
 .TP
 Q:
@@ -443,26 +527,67 @@ Q:
 My hard drive suddenly has many bad sectors, what should I do?
 .TP
 A:
-Avoid accessing bad areas as much as possible to prevent further damage, while
-rescuing the still good data.  Accessing bad sectors will make the drive
-perform lots of error recovery in its own, leading to lots of physical
-movement, and potentially lockdown of more disk areas by the firmware.  You
-could use smartmontools to check drive error statistic and details about whats
-wrong / internal error logs.  If you have a list of affected blocks/sectors,
-write a badblocks file manually and use the -X option to prevent safecopy from
-accessing them altogether at first. (Syslog may list them, too) Then slowly do
-incremental recovery, start with a high fault skip (-f) and resolution (-r),
-set retry (-R) and Head recalibration (-Z) to 0.  (Don't set the resolution
-lower than physical sector size if your driver does correct sector alignments.)
-Then decrease resolution and fault skip down to physical block size, increase
-the retry factor and at last try to add the -Z factor.  (It probably won't help
-much on hard disks but its worth a try) If your drive stops responding, reboot,
-let it cool down for a while if necessary.  (I heard from people who used
-ice-packs successfully as a last resort)
+Speed is an essential factor when rescuing data from a bad hard drive.
+Accesses to bad areas or even just time running can further damage the
+drive and make formerly readable areas unreadable, be it due to
+temperature rise, damaged heads scratching still good parts of the
+surface, bearings degrading due to vibration, etc.  Its advisable to
+shut the system down and remove the hard drive from the computer as soon
+as errors occur and as fast as possible without causing further damage.
+.IP
+(Don't pull the plug! Press reset to force reboot and then power down
+via power button/ACPI)
+.IP
+Set up a rescue system with enough disk space to store all the data
+from the damaged drive (and possibly multiple copies of it).  If you
+have an external hard drive case that connects via USB SATA or SCSI,
+allowing a hot plug of the drive into a running system, use it.  This
+allows you to prepare everything without the need for the drive to power
+up and possibly BIOS or operating system involuntarily accessing it.
+You also get easier access to the drive to check temperature or noise
+during operation.
+.IP
+When you rescue data, rescue good data first before attempting to
+access bad sectors. Safecopy allows you to skip known problem sectors
+using a badblock exclude file (-X) which you might be able to retrieve
+from system logs or from the drive internal logs, via smartmontools or
+similar software. Be aware that you might possibly need to convert
+physical sector numbers into logical block numbers depending on your
+source.
+.IP
+Also you should tell safecopy to jump out of any problematic areas ASAP
+and continue somewhere else. Parameters "-f 10% -r 10% -R 0 -Z 0" would
+do the trick by making safecopy skip 10% of the device content and
+continue there without backtracking. You can always attempt to get the
+data in between later, first get the supposedly good data on the rest
+of the drive. Depending on the method of data recovery you plan on
+using, it may make sense to mark the bad data with the "-M" option.
+This allows you to later find files affected by data corruption more
+easily.  Use the "-o" option to make safecopy write a badblock list
+with all blocks skipped or unreadable.
+.IP
+When safecopy is done with this first run, you can attempt a second go
+trying to get more data. Using smaller values for "-f" and allowing
+safecopy to backtrack for the end of the affected area "-r 1*".
+Be sure to use incremental mode "-I" to only read the blocks skipped
+in the first run.
+.IP
+It may make sense to let the drive cool down between runs.
+Once you got all the data from the "good" areas of the drive you can
+risk more "thorough" access to it. Increase the numbers of retries
+"-R" in case of bad blocks, maybe together with a head realignment
+"-Z 1". "-f 1*" would make safecopy try to read on every single block,
+not skipping over bad areas at all.
+.IP
+If your drive stops responding, power it down, let it cool down for a
+while, then try again.
+.IP
+(I heard from people who brought dead drives back to live for a short
+time by cooling them to low temperatures with ice-packs.)
 .IP
 .B !!!
 If the data is really important, go to a professional data recovery specialist
-right away, before doing further damage to the drive
+right away, before doing further damage to the drive.
 
 .SH "EXIT STATUS"
 safecopy always returns 0 (zero) regardless of success rate and/or aborted

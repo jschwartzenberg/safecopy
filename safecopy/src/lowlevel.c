@@ -4,12 +4,21 @@
 #ifndef __linux__
 // if we don't have linux, the used ioctrls will be different
 // use a dummy read function that uses high lvl operations
-size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
-			off_t position, size_t length,
+off_t read_desperately(char* filename, int *fd, unsigned char* buffer,
+			off_t position, off_t length,
 			int seekable, int recovery, int syncmode) {
-	size_t retval;
+	off_t retval;
 	retval=read(*fd,buffer,length);
 	return retval;
+}
+off_t lowlevel_filesize(char* filename, off_t filesize) {
+	return filesize;
+}
+off_t lowlevel_blocksize(char* filename, off_t blocksize) {
+	return blocksize;
+}
+int lowlevel_canseek() {
+	return 0;
 }
 #else
 
@@ -91,21 +100,38 @@ int is_cd(int fd) {
 			cdromsectorsize=2324;
 			cdromsectoroffset=24;
 		} else if (retval==CDS_MIXED) {
-			fprintf(stderr,"\nCDROM mixed mode - low level access: drive reset\n");
+			fprintf(stderr,"CDROM mixed mode - low level access: drive reset\n");
 			cdromsectorsize=0;
 			cdromsectoroffset=0;
 			return 1;
 		} else {
-			fprintf(stderr,"\nCDROM unknown disc - low level access: drive reset\n");
+			fprintf(stderr,"CDROM unknown disc - low level access: drive reset\n");
 			cdromsectorsize=0;
 			cdromsectoroffset=0;
 			return 1;
 		}
-		fprintf(stderr,"\nCDROM %s - low level access: drive reset, raw read\nPlease use a devisor of %i as blocksize\n",mode,cdromsectorsize);
+		fprintf(stderr,"CDROM %s - low level access: drive reset, raw read\n",mode);
 	} else {
 		iscd=0;
 	}
 	return iscd;
+}
+// get blocksize and filesize info
+off_t blocksize_cd(int fd, off_t blocksize) {
+	if (cdromsectorsize!=0) {
+		fprintf(stderr,"CDROM low level block size: %u\n",cdromsectorsize);
+		blocksize=cdromsectorsize;
+	}
+	return blocksize;
+}
+off_t filesize_cd(int fd, off_t filesize) {
+	long result;
+	int retval=ioctl(fd,CDROM_LAST_WRITTEN,&result);
+	if (retval==0 && cdromsectorsize>0) {
+		fprintf(stderr,"CDROM low level disk size: %lu\n",cdromsectorsize*(result));
+		filesize=cdromsectorsize*(result);
+	}
+	return filesize;
 }
 
 // is_dvd queries dvd layer information
@@ -116,7 +142,7 @@ int is_dvd(int fd) {
 	s.type=DVD_STRUCT_PHYSICAL;
 	if (ioctl(fd,DVD_READ_STRUCT,&s)>=0) {
 		isdvd=1;
-		fprintf(stderr,"\nDVD low level access: drive reset\n");
+		fprintf(stderr,"DVD low level access: drive reset\n");
 	} else {
 		isdvd=0;
 	}
@@ -141,7 +167,7 @@ void lba_to_msf( off_t lba, struct cdrom_msf * msf) {
 	//lba'''= msf->cdmsf_min0;
 }
 // read raw mode sector from a cd
-size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length) {
+off_t read_from_cd(int fd, unsigned char* buffer, off_t position, off_t length) {
 
 	unsigned char blockbuffer[CD_FRAMESIZE_RAWER];
 	struct cdrom_msf *msf=(struct cdrom_msf*)blockbuffer;
@@ -156,7 +182,7 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 	}
 	off_t lba=position/cdromsectorsize;
 	off_t extra=position-(lba*cdromsectorsize);
-	size_t xlength=cdromsectorsize-extra;
+	off_t xlength=cdromsectorsize-extra;
 
 	if (xlength>length) xlength=length;
 	lba_to_msf(lba,msf);
@@ -182,10 +208,10 @@ size_t read_from_cd(int fd, unsigned char* buffer, off_t position, size_t length
 // return>0: amounts of bytes read, the device will be open and the internal
 // seek pointer point to position+length
 // return<0: error. the device will be open but in undefined condition
-size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
-			off_t position, size_t length,
+off_t read_desperately(char* filename, int *fd, unsigned char* buffer,
+			off_t position, off_t length,
 			int seekable, int recovery, int syncmode) {
-	size_t retval;
+	off_t retval;
 	
 	if (is_dvd(*fd)) {
 		//linux dvdrom driver doesn't provide reasonably documented
@@ -245,5 +271,36 @@ size_t read_desperately(char* filename, int *fd, unsigned char* buffer,
 		retval=read(*fd,buffer,length);
 		return retval;
 	}
+}
+// tries to get some generic driver information
+off_t lowlevel_filesize(char* filename, off_t filesize) {
+	int inf=open(filename, O_RDONLY);
+	off_t result;
+	if (is_dvd(inf)) {
+		result=filesize;
+	} else if (is_cd(inf)) {
+		result=filesize_cd(inf,filesize);
+	} else {
+		result=filesize;
+	}
+	close(inf);
+	return result;
+}
+off_t lowlevel_blocksize(char* filename, off_t blocksize) {
+	int inf=open(filename, O_RDONLY);
+	off_t result;
+	if (is_dvd(inf)) {
+		result=blocksize;
+	} else if (is_cd(inf)) {
+		result=blocksize_cd(inf,blocksize);
+	} else {
+		result=blocksize;
+	}
+	close(inf);
+	return result;
+}
+int lowlevel_canseek() {
+	if (is_cd(0)) return 1;
+	return 0;
 }
 #endif //__linux__

@@ -38,11 +38,22 @@
 #include <string.h>
 #include "arglist.h"
 
-#define MAXBLOCKSIZE 1048576
+#define FAILSTRING "BaDbLoCk"
+#define MAXBLOCKSIZE 104857600
 #define BLOCKSIZE 4096
 #define RETRIES 3
 #define SEEKS 1
-#define LOWLEVELMODE 1
+
+#define DEFBLOCKSIZE "1*"
+#define DEFFAULTBLOCKSIZE "16*"
+#define DEFRESOLUTION "1*"
+#define DEFRETRIES 3
+#define DEFHEADMOVE 1
+#define DEFLOWLEVEL 1
+#define DEFFAILSTRING NULL
+#define DEFOUTPUTBB NULL
+#define DEFINPUTBB NULL
+#define DEFEXCLBB NULL
 
 #define VERY_FAST 100
 #define FAST VERY_FAST*100
@@ -57,107 +68,165 @@
 #define VERY_VERY_SLOW_ICON "  8-X"
 
 void usage(char * name) {
-	fprintf(stderr,"Safecopy "VERSION" by CorvusCorax\n");
-	fprintf(stderr,"Usage: %s [options] <source> <target>\n",name);
-	fprintf(stderr,"Options:\n");
-	fprintf(stderr,"	-b <bytes> : Blocksize in bytes for default read operations.\n");
-	fprintf(stderr,"	             Set this to the physical sectorsize of your media.\n");
-	fprintf(stderr,"	             Default: Driver blocksize of input device,\n");
-	fprintf(stderr,"	                      if determinable, otherwise %i\n",BLOCKSIZE);
-	fprintf(stderr,"	-f <bytes> : Blocksize in bytes when skipping over badblocks.\n");
-	fprintf(stderr,"	             Higher settings put less strain on your hardware,\n");
-	fprintf(stderr,"	             But you might miss good areas in between two bad ones.\n");
-	fprintf(stderr,"	             Default: Blocksize as in -b times 16\n");
-	fprintf(stderr,"	-r <bytes> : Resolution in bytes when searching for the exact\n");
-	fprintf(stderr,"	             beginning or end of a bad area.\n");
-	fprintf(stderr,"	             If you read data directly from a device there is no\n");
-	fprintf(stderr,"	             need to set this lower than the hardware blocksize.\n");
-	fprintf(stderr,"	             On mounted filesystems however, read blocks\n");
-	fprintf(stderr,"	             and physical blocks could be misaligned.\n");
-	fprintf(stderr,"	             Smaller values lead to very thorough attempts to read\n");
-	fprintf(stderr,"	             data at the edge of damaged areas,\n");
-	fprintf(stderr,"	             but increase the strain on the damaged media.\n");
-	fprintf(stderr,"	             Default: Blocksize as in -b\n");
-	fprintf(stderr,"	-R <number> : At least that many read attempts are made on the first\n");
-	fprintf(stderr,"	              bad block of a damaged area with minimum resolution.\n");
-	fprintf(stderr,"	              More retries can sometimes recover a weak sector,\n");
-	fprintf(stderr,"	              but at the cost of additional strain.\n");
-	fprintf(stderr,"	              Default: %i\n",RETRIES);
-	fprintf(stderr,"	-Z <number> : On each error, force seek the read head from start to\n");
-	fprintf(stderr,"	              end of the source device as often as specified.\n");
-	fprintf(stderr,"	              That takes time, creates additional strain and might\n");
-	fprintf(stderr,"	              not be supported by all devices or drivers.\n");
-	fprintf(stderr,"	              Default: %i\n",SEEKS);
-	fprintf(stderr,"	-L <mode> : Use low level device calls as specified:\n");
-	fprintf(stderr,"	                   0  Do not use low level device calls\n");
-	fprintf(stderr,"	                   1  Attempt low level device calls\n");
-	fprintf(stderr,"	                      for error recovery only\n");
-	fprintf(stderr,"	                   2  Always use low level device calls\n");
-	fprintf(stderr,"	                      if available\n");
-	fprintf(stderr,"	            Supported low level features in this version are:\n");
-	fprintf(stderr,"	                SYSTEM  DEVICE TYPE   FEATURE\n");
-	fprintf(stderr,"	                Linux   cdrom/dvd     bus/device reset\n");
-	fprintf(stderr,"	                Linux   cdrom         read sector in raw mode\n");
-	fprintf(stderr,"	                Linux   floppy        controller reset, twaddle\n");
-	fprintf(stderr,"	            Default: %i\n",LOWLEVELMODE);
-	fprintf(stderr,"	--sync : Use synchronized read calls (disable driver buffering)\n");
-	fprintf(stderr,"	         Default: Asynchronous read buffering by the OS is allowed\n");
-	fprintf(stderr,"	-s <blocks> : Start position where to start reading.\n");
-	fprintf(stderr,"	              Will correspond to position 0 in the destination file.\n");
-	fprintf(stderr,"	              Default: block 0\n");
-	fprintf(stderr,"	-l <blocks> : Maximum length of data to be read.\n");
-	fprintf(stderr,"	              Default: Entire size of input file\n");
-	fprintf(stderr,"	-I <badblockfile> : Incremental mode. Assume the target file already\n");
-	fprintf(stderr,"	                    exists and has holes specified in a badblockfile.\n");
-	fprintf(stderr,"	                    It will be attempted to retrieve more data from\n");
-	fprintf(stderr,"	                    the missing areas only.\n");
-	fprintf(stderr,"	                    Default: none\n");
-	fprintf(stderr,"	-i <bytes> : Blocksize to interpret the badblockfile given with -I.\n");
-	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
-	fprintf(stderr,"	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in\n");
-	fprintf(stderr,"	                    badblockfile. If used together with -I,\n");
-	fprintf(stderr,"	                    excluded blocks override included blocks.\n");
-	fprintf(stderr,"	                    Default: none\n");
-	fprintf(stderr,"	-x <bytes> : Blocksize to interpret the badblockfile given with -X.\n");
-	fprintf(stderr,"	             Default: Blocksize as specified by -b\n");
-	fprintf(stderr,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
-	fprintf(stderr,"	                    Default: none\n");
-	fprintf(stderr,"	-S <seekscript> : Use external script for seeking in input file.\n");
-	fprintf(stderr,"	                  (Might be useful for tape devices and similar).\n");
-	fprintf(stderr,"	                  Seekscript must be an executable that takes the\n");
-	fprintf(stderr,"	                  number of blocks to be skipped as argv1 (1-64)\n");
-	fprintf(stderr,"	                  the blocksize in bytes as argv2\n");
-	fprintf(stderr,"	                  and the current position (in bytes) as argv3.\n");
-	fprintf(stderr,"	                  Return value needs to be the number of blocks\n");
-	fprintf(stderr,"	                  successfully skipped, or 0 to indicate seek failure.\n");
-	fprintf(stderr,"	                  The external seekscript will only be used\n");
-	fprintf(stderr,"	                  if lseek() fails and we need to skip over data.\n");
-	fprintf(stderr,"	                  Default: none\n");
-	fprintf(stderr,"	-M <string> : Mark unrecovered data with this string instead of\n");
-	fprintf(stderr,"	              skipping / zero-padding it. This helps in later\n");
-	fprintf(stderr,"	              finding affected files on file system images\n");
-	fprintf(stderr,"	              that couldn't be rescued completely.\n");
-	fprintf(stderr,"	              Default: none\n");
-	fprintf(stderr,"	-h | --help : Show this text\n\n");
-	fprintf(stderr,"Description of output:\n");
-	fprintf(stderr,"	. : Between 1 and 1024 blocks successfully read.\n");
-	fprintf(stderr,"	_ : Read of block was incomplete. (possibly end of file)\n");
-	fprintf(stderr,"	    The blocksize is now reduced to read the rest.\n");
-	fprintf(stderr,"	|/| : Seek failed, source can only be read sequentially.\n");
-	fprintf(stderr,"	> : Read failed, reducing blocksize to read partial data.\n");
-	fprintf(stderr,"	! : A low level error on read attempt of smallest allowed size\n");
-	fprintf(stderr,"	    leads to a retry attempt.\n");
-	fprintf(stderr,"	[xx](+yy){ : Current block and number of bytes continuously\n");
-	fprintf(stderr,"	             read successfully up to this point.\n");
-	fprintf(stderr,"	X : Read failed on a block with minimum blocksize and is skipped.\n");
-	fprintf(stderr,"	    Unrecoverable error, destination file is padded with zeros.\n");
-	fprintf(stderr,"	    Data is now skipped until end of the unreadable area is reached.\n");
-	fprintf(stderr,"	< : Successful read after the end of a bad area causes\n");
-	fprintf(stderr,"	    backtracking with smaller blocksizes to search for the first\n");
-	fprintf(stderr,"	    readable data.\n");
-	fprintf(stderr,"	}[xx](+yy) : current block and number of bytes of recent\n");
-	fprintf(stderr,"	             continuous unreadable data.\n\n");
-	fprintf(stderr,"Copyright 2009, distributed under terms of the GPL\n\n");
+	fprintf(stdout,"Safecopy "VERSION" by CorvusCorax\n");
+	fprintf(stdout,"Usage: %s [options] <source> <target>\n",name);
+	fprintf(stdout,"Options:\n");
+	fprintf(stdout,"	--stage1 : Preset to rescue most of the data fast,\n");
+	fprintf(stdout,"	           using no retries and avoiding bad areas.\n");
+	fprintf(stdout,"	           Implies: -f 10%% -r 10%% -R 1 -Z 0 -L 2 -M %s\n",FAILSTRING);
+	fprintf(stdout,"	                    -o stage1.badblocks\n");
+	fprintf(stdout,"	--stage2 : Preset to rescue more data, using no retries\n");
+	fprintf(stdout,"	           but searching for exact ends of bad areas.\n");
+	fprintf(stdout,"	           Implies: -f 1%% -r 1* -R 1 -Z 0 -L 2\n");
+	fprintf(stdout,"	                    -I stage1.badblocks\n");
+	fprintf(stdout,"	                    -o stage2.badblocks\n");
+	fprintf(stdout,"	--stage3 : Preset to rescue everything that can be rescued\n");
+	fprintf(stdout,"	           using maximum retries, head realignment tricks\n");
+	fprintf(stdout,"	           and low level access.\n");
+	fprintf(stdout,"	           Implies: -f 1* -r 1* -R 4 -Z 1 -L 2\n");
+	fprintf(stdout,"	                    -I stage2.badblocks\n");
+	fprintf(stdout,"	                    -o stage3.badblocks\n");
+	fprintf(stdout,"	-b <size> : Blocksize for default read operations.\n");
+	fprintf(stdout,"	            Set this to the physical sectorsize of your media.\n");
+	fprintf(stdout,"	            Default: 1*\n");
+	fprintf(stdout,"	            Hardware block size if reported by OS, otherwise %i\n",BLOCKSIZE);
+	fprintf(stdout,"	-f <size> : Blocksize when skipping over badblocks.\n");
+	fprintf(stdout,"	            Higher settings put less strain on your hardware,\n");
+	fprintf(stdout,"	            but you might miss good areas in between two bad ones.\n");
+	fprintf(stdout,"	            Default: 16*\n");
+	fprintf(stdout,"	-r <size> : Resolution in bytes when searching for the exact\n");
+	fprintf(stdout,"	            beginning or end of a bad area.\n");
+	fprintf(stdout,"	            If you read data directly from a device there is no\n");
+	fprintf(stdout,"	            need to set this lower than the hardware blocksize.\n");
+	fprintf(stdout,"	            On mounted filesystems however, read blocks\n");
+	fprintf(stdout,"	            and physical blocks could be misaligned.\n");
+	fprintf(stdout,"	            Smaller values lead to very thorough attempts to read\n");
+	fprintf(stdout,"	            data at the edge of damaged areas,\n");
+	fprintf(stdout,"	            but increase the strain on the damaged media.\n");
+	fprintf(stdout,"	            Default: 1*\n");
+	fprintf(stdout,"	-R <number> : At least that many read attempts are made on the first\n");
+	fprintf(stdout,"	              bad block of a damaged area with minimum resolution.\n");
+	fprintf(stdout,"	              More retries can sometimes recover a weak sector,\n");
+	fprintf(stdout,"	              but at the cost of additional strain.\n");
+	fprintf(stdout,"	              Default: %i\n",RETRIES);
+	fprintf(stdout,"	-Z <number> : On each error, force seek the read head from start to\n");
+	fprintf(stdout,"	              end of the source device as often as specified.\n");
+	fprintf(stdout,"	              That takes time, creates additional strain and might\n");
+	fprintf(stdout,"	              not be supported by all devices or drivers.\n");
+	fprintf(stdout,"	              Default: %i\n",SEEKS);
+	fprintf(stdout,"	-L <mode> : Use low level device calls as specified:\n");
+	fprintf(stdout,"	                   0  Do not use low level device calls\n");
+	fprintf(stdout,"	                   1  Attempt low level device calls\n");
+	fprintf(stdout,"	                      for error recovery only\n");
+	fprintf(stdout,"	                   2  Always use low level device calls\n");
+	fprintf(stdout,"	                      if available\n");
+	fprintf(stdout,"	            Supported low level features in this version are:\n");
+	fprintf(stdout,"	                SYSTEM  DEVICE TYPE   FEATURE\n");
+	fprintf(stdout,"	                Linux   cdrom/dvd     bus/device reset\n");
+	fprintf(stdout,"	                Linux   cdrom         read sector in raw mode\n");
+	fprintf(stdout,"	                Linux   floppy        controller reset, twaddle\n");
+	fprintf(stdout,"	            Default: %i\n",DEFLOWLEVEL);
+	fprintf(stdout,"	--sync : Use synchronized read calls (disable driver buffering)\n");
+	fprintf(stdout,"	         Default: Asynchronous read buffering by the OS is allowed\n");
+	fprintf(stdout,"	-s <blocks> : Start position where to start reading.\n");
+	fprintf(stdout,"	              Will correspond to position 0 in the destination file.\n");
+	fprintf(stdout,"	              Default: block 0\n");
+	fprintf(stdout,"	-l <blocks> : Maximum length of data to be read.\n");
+	fprintf(stdout,"	              Default: Entire size of input file\n");
+	fprintf(stdout,"	-I <badblockfile> : Incremental mode. Assume the target file already\n");
+	fprintf(stdout,"	                    exists and has holes specified in a badblockfile.\n");
+	fprintf(stdout,"	                    It will be attempted to retrieve more data from\n");
+	fprintf(stdout,"	                    the missing areas only.\n");
+	fprintf(stdout,"	                    Default: none\n");
+	fprintf(stdout,"	-i <bytes> : Blocksize to interpret the badblockfile given with -I.\n");
+	fprintf(stdout,"	             Default: Blocksize as specified by -b\n");
+	fprintf(stdout,"	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in\n");
+	fprintf(stdout,"	                    badblockfile. If used together with -I,\n");
+	fprintf(stdout,"	                    excluded blocks override included blocks.\n");
+	fprintf(stdout,"	                    Default: none\n");
+	fprintf(stdout,"	-x <bytes> : Blocksize to interpret the badblockfile given with -X.\n");
+	fprintf(stdout,"	             Default: Blocksize as specified by -b\n");
+	fprintf(stdout,"	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.\n");
+	fprintf(stdout,"	                    Default: none\n");
+	fprintf(stdout,"	-S <seekscript> : Use external script for seeking in input file.\n");
+	fprintf(stdout,"	                  (Might be useful for tape devices and similar).\n");
+	fprintf(stdout,"	                  Seekscript must be an executable that takes the\n");
+	fprintf(stdout,"	                  number of blocks to be skipped as argv1 (1-64)\n");
+	fprintf(stdout,"	                  the blocksize in bytes as argv2\n");
+	fprintf(stdout,"	                  and the current position (in bytes) as argv3.\n");
+	fprintf(stdout,"	                  Return value needs to be the number of blocks\n");
+	fprintf(stdout,"	                  successfully skipped, or 0 to indicate seek failure.\n");
+	fprintf(stdout,"	                  The external seekscript will only be used\n");
+	fprintf(stdout,"	                  if lseek() fails and we need to skip over data.\n");
+	fprintf(stdout,"	                  Default: none\n");
+	fprintf(stdout,"	-M <string> : Mark unrecovered data with this string instead of\n");
+	fprintf(stdout,"	              skipping / zero-padding it. This helps in later\n");
+	fprintf(stdout,"	              finding affected files on file system images\n");
+	fprintf(stdout,"	              that couldn't be rescued completely.\n");
+	fprintf(stdout,"	              Default: none\n");
+	fprintf(stdout,"	-h | --help : Show this text\n\n");
+	fprintf(stdout,"Valid parameters for -f -r -b <size> options are:\n");
+	fprintf(stdout,"	<integer>	Amount in bytes - i.e. 1024\n");
+	fprintf(stdout,"	<percentage>%%	Percentage of whole file/device size - e.g. 10%\n");
+	fprintf(stdout,"	<number>*	-b only, number times blocksize reported by OS\n");
+	fprintf(stdout,"	<number>*	-f and -r only, number times the value of -b\n\n");
+	fprintf(stdout,"Description of output:\n");
+	fprintf(stdout,"	. : Between 1 and 1024 blocks successfully read.\n");
+	fprintf(stdout,"	_ : Read of block was incomplete. (possibly end of file)\n");
+	fprintf(stdout,"	    The blocksize is now reduced to read the rest.\n");
+	fprintf(stdout,"	|/| : Seek failed, source can only be read sequentially.\n");
+	fprintf(stdout,"	> : Read failed, reducing blocksize to read partial data.\n");
+	fprintf(stdout,"	! : A low level error on read attempt of smallest allowed size\n");
+	fprintf(stdout,"	    leads to a retry attempt.\n");
+	fprintf(stdout,"	[xx](+yy){ : Current block and number of bytes continuously\n");
+	fprintf(stdout,"	             read successfully up to this point.\n");
+	fprintf(stdout,"	X : Read failed on a block with minimum blocksize and is skipped.\n");
+	fprintf(stdout,"	    Unrecoverable error, destination file is padded with zeros.\n");
+	fprintf(stdout,"	    Data is now skipped until end of the unreadable area is reached.\n");
+	fprintf(stdout,"	< : Successful read after the end of a bad area causes\n");
+	fprintf(stdout,"	    backtracking with smaller blocksizes to search for the first\n");
+	fprintf(stdout,"	    readable data.\n");
+	fprintf(stdout,"	}[xx](+yy) : current block and number of bytes of recent\n");
+	fprintf(stdout,"	             continuous unreadable data.\n\n");
+	fprintf(stdout,"Copyright 2009, distributed under terms of the GPL\n\n");
+}
+
+// parse an option string
+off_t parseoption(char* option, int blocksize, off_t filesize,char* defaultvalue) {
+	if (option==NULL) {
+		return parseoption(defaultvalue,blocksize,filesize,defaultvalue);
+	}
+	int len=strlen(option);
+	int number;
+	off_t result;
+	char* newoption=strdup(option);
+	if (arglist_isinteger(option)==0) {
+		return(arglist_integer(option));
+	}
+	if (len<2) return parseoption(defaultvalue,blocksize,filesize,defaultvalue);
+	if (option[len-1]=='%') {
+		newoption[len-1]=0;
+		if (arglist_isinteger(newoption)==0) {
+			number=arglist_integer(newoption);
+			if (filesize>0) {
+				result=((filesize*number)/100);
+			} else {
+				result=(blocksize*number);
+			}
+			// round by blocksize
+			return ((((result/blocksize)>0)?(result/blocksize):1)*blocksize);
+		}
+		return parseoption(defaultvalue,blocksize,filesize,defaultvalue);
+	}
+	if (option[len-1]=='*') {
+		newoption[len-1]=0;
+		if (arglist_isinteger(newoption)==0) {
+			number=arglist_integer(newoption);
+			return (blocksize*number);
+		}
+		return parseoption(defaultvalue,blocksize,filesize,defaultvalue);
+	}
+	return parseoption(defaultvalue,blocksize,filesize,defaultvalue);
 }
 
 // print percentage to stderr
@@ -264,6 +333,17 @@ int main(int argc, char ** argv) {
 	struct arglist *carglist;
 	// filenames
 	char *sourcefile,*destfile,*bblocksinfile,*xblocksinfile,*bblocksoutfile,*seekscriptfile;
+	// default options
+	char *blocksizestring=DEFBLOCKSIZE;
+	char *resolutionstring=DEFRESOLUTION;
+	char *faultblocksizestring=DEFFAULTBLOCKSIZE;
+	char *bblocksinstring=DEFINPUTBB;
+	char *bblocksoutstring=DEFOUTPUTBB;
+	char *xblocksinstring=DEFEXCLBB;
+	char *failuredefstring=DEFFAILSTRING;
+	int retriesdef=DEFRETRIES;
+	int headmovedef=DEFHEADMOVE;
+	int lowleveldef=DEFLOWLEVEL;
 	// file descriptors
 	int source,destination,bblocksout;
 	// high level file descriptor
@@ -273,7 +353,7 @@ int main(int argc, char ** argv) {
 	off_t readposition,cposition,sposition,writeposition;
 	off_t startoffset,length,writeoffset;
 	// variables for handling read/written sizes/remainders
-	ssize_t remain,block,writeblock,writeremain;
+	off_t remain,maxremain,block,writeblock,writeremain;
 	// pointer to main IO data buffer
 	char * databuffer;
 	// a buffer for output text
@@ -283,8 +363,9 @@ int main(int argc, char ** argv) {
 	// pointer to marker string
 	char *marker;
 	// several local integer variables
-	int blocksize,iblocksize,xblocksize,faultblocksize;
-	int resolution,retries,seeks,cseeks;
+	off_t fsblocksize,blocksize,iblocksize,xblocksize,faultblocksize;
+	off_t resolution;
+	int retries,seeks,cseeks;
 	int incremental,excluding,lowlevel,syncmode;
 	int counter,percent,oldpercent,newerror,newsofterror;
 	int backtracemode,output,linewidth,seekable,desperate;
@@ -307,11 +388,17 @@ int main(int argc, char ** argv) {
 	long int elapsed,oldelapsed,oldcategory;
 	// select() needs these
 	fd_set rfds,efds;
+	// tmp int vars
+	int errtmp;
 
 // 2.command line parsing
 
 	// parse all commandline arguments
 	carglist=arglist_new(argc,argv);
+	arglist_addarg (carglist,"--stage",1);
+	arglist_addarg (carglist,"--stage1",0);
+	arglist_addarg (carglist,"--stage2",0);
+	arglist_addarg (carglist,"--stage3",0);
 	arglist_addarg (carglist,"--help",0);
 	arglist_addarg (carglist,"-h",0);
 	arglist_addarg (carglist,"--sync",0);
@@ -345,8 +432,36 @@ int main(int argc, char ** argv) {
 	sourcefile=arglist_parameter(carglist,"VOIDARGS",0);
 	destfile=arglist_parameter(carglist,"VOIDARGS",1);
 
+	if (arglist_arggiven(carglist,"--stage1")==0 ||arglist_integer(arglist_parameter(carglist,"--stage",0))==1) {
+		faultblocksizestring="10%";
+		resolutionstring="10%";
+		retriesdef=1;
+		headmovedef=0;
+		lowleveldef=2;
+		failuredefstring=FAILSTRING;
+		bblocksoutstring="stage1.badblocks";
+	}
+	if (arglist_arggiven(carglist,"--stage2")==0 || arglist_integer(arglist_parameter(carglist,"--stage",0))==2) {
+		faultblocksizestring="1%";
+		resolutionstring="1*";
+		retriesdef=1;
+		headmovedef=0;
+		lowleveldef=2;
+		bblocksinstring="stage1.badblocks";
+		bblocksoutstring="stage2.badblocks";
+	}
+	if (arglist_arggiven(carglist,"--stage3")==0 || arglist_integer(arglist_parameter(carglist,"--stage",0))==3) {
+		faultblocksizestring="1*";
+		resolutionstring="1*";
+		bblocksinstring="stage2.badblocks";
+		bblocksoutstring="stage3.badblocks";
+		retriesdef=4;
+		headmovedef=1;
+		lowleveldef=2;
+	}
+
 	// low level calls enabled?
-	lowlevel=LOWLEVELMODE;
+	lowlevel=lowleveldef;
 	if (arglist_arggiven(carglist,"-L")==0) {
 		lowlevel=arglist_integer(arglist_parameter(carglist,"-L",0));
 	}
@@ -363,21 +478,19 @@ int main(int argc, char ** argv) {
 
 	// find out source file size and block size
 	filesize=0;
-	blocksize=BLOCKSIZE;
+	fsblocksize=BLOCKSIZE;
 	if(!stat(sourcefile,&filestatus)) {
 		filesize=filestatus.st_size;
 		if (filestatus.st_blksize) {
 			fprintf(stdout,"Reported hw blocksize: %lu\n",filestatus.st_blksize);
-			blocksize=filestatus.st_blksize;
+			fsblocksize=filestatus.st_blksize;
 		}
 	}
-
-	if (arglist_arggiven(carglist,"-b")==0) {
-		blocksize=arglist_integer(arglist_parameter(carglist,"-b",0));
+	if (lowlevel>0) {
+		filesize=lowlevel_filesize(sourcefile,filesize);
+		fsblocksize=lowlevel_blocksize(sourcefile,fsblocksize);
+		fprintf(stdout,"Reported low level blocksize: %lu\n",fsblocksize);
 	}
-	if (blocksize<1) blocksize=BLOCKSIZE;
-	if (blocksize>MAXBLOCKSIZE) blocksize=MAXBLOCKSIZE;
-	fprintf(stdout,"Blocksize: %lu\n",blocksize);
 
 	if (filesize!=0) {
 		fprintf(stdout,"File size: %llu\n",filesize);
@@ -396,30 +509,41 @@ int main(int argc, char ** argv) {
 		}
 	}
 	
-	resolution=blocksize;
-	if (arglist_arggiven(carglist,"-r")==0) {
-		resolution=arglist_integer(arglist_parameter(carglist,"-r",0));
+	tmp=blocksizestring;
+	if (arglist_arggiven(carglist,"-b")==0) {
+		blocksizestring=arglist_parameter(carglist,"-b",0);
 	}
-	if (resolution<1) resolution=1;
-	if (resolution>blocksize) resolution=blocksize;
-	fprintf(stdout,"Resolution: %u\n",resolution);
+	blocksize=parseoption(blocksizestring,fsblocksize,filesize,tmp);
+	if (blocksize<1) blocksize=fsblocksize;
+	if (blocksize>MAXBLOCKSIZE) blocksize=MAXBLOCKSIZE;
+	fprintf(stdout,"Blocksize: %llu\n",blocksize);
 
-	faultblocksize=blocksize*16;
+	tmp=faultblocksizestring;
 	if (arglist_arggiven(carglist,"-f")==0) {
-		faultblocksize=arglist_integer(arglist_parameter(carglist,"-f",0));
+		faultblocksizestring=arglist_parameter(carglist,"-f",0);
 	}
-	if (faultblocksize<resolution) faultblocksize=resolution;
+	faultblocksize=parseoption(faultblocksizestring,blocksize,filesize,tmp);
+	if (faultblocksize<blocksize) faultblocksize=blocksize;
 	if (faultblocksize>MAXBLOCKSIZE) faultblocksize=MAXBLOCKSIZE;
-	fprintf(stdout,"Fault skip blocksize: %u\n",faultblocksize);
+	fprintf(stdout,"Fault skip blocksize: %llu\n",faultblocksize);
+
+	tmp=resolutionstring;
+	if (arglist_arggiven(carglist,"-r")==0) {
+		resolutionstring=arglist_parameter(carglist,"-r",0);
+	}
+	resolution=parseoption(resolutionstring,blocksize,filesize,tmp);
+	if (resolution<1) resolution=1;
+	if (resolution>faultblocksize) resolution=faultblocksize;
+	fprintf(stdout,"Resolution: %llu\n",resolution);
 	
-	retries=RETRIES;
+	retries=retriesdef;
 	if (arglist_arggiven(carglist,"-R")==0) {
 		retries=arglist_integer(arglist_parameter(carglist,"-R",0));
 	}
 	if (retries<1) retries=1;
 	fprintf(stdout,"Min read attempts: %u\n",retries);
 
-	seeks=SEEKS;
+	seeks=headmovedef;
 	if (arglist_arggiven(carglist,"-Z")==0) {
 		seeks=arglist_integer(arglist_parameter(carglist,"-Z",0));
 	}
@@ -438,9 +562,12 @@ int main(int argc, char ** argv) {
 
 	incremental=0;
 	if (arglist_arggiven(carglist,"-I")==0) {
+		bblocksinstring=arglist_parameter(carglist,"-I",0);
+	}
+	if (bblocksinstring!=NULL) {
 		incremental=1;
-		bblocksinfile=arglist_parameter(carglist,"-I",0);
-		fprintf(stdout,"Incremental mode file: %s\nIncremental mode blocksize: %lu\n",bblocksinfile,iblocksize);
+		bblocksinfile=bblocksinstring;
+		fprintf(stdout,"Incremental mode file: %s\nIncremental mode blocksize: %llu\n",bblocksinfile,iblocksize);
 	}
 
 	xblocksize=blocksize;
@@ -455,14 +582,20 @@ int main(int argc, char ** argv) {
 
 	excluding=0;
 	if (arglist_arggiven(carglist,"-X")==0) {
+		xblocksinstring=arglist_parameter(carglist,"-X",0);
+	}
+	if (xblocksinstring!=NULL) {
 		excluding=1;
-		xblocksinfile=arglist_parameter(carglist,"-X",0);
-		fprintf(stdout,"Exclusion mode file: %s\nExclusion mode blocksize: %lu\n",xblocksinfile,xblocksize);
+		xblocksinfile=xblocksinstring;
+		fprintf(stdout,"Exclusion mode file: %s\nExclusion mode blocksize: %llu\n",xblocksinfile,xblocksize);
 	}
 
 	bblocksoutfile=NULL;
 	if (arglist_arggiven(carglist,"-o")==0) {
-		bblocksoutfile=arglist_parameter(carglist,"-o",0);
+		bblocksoutstring=arglist_parameter(carglist,"-o",0);
+	}
+	if (bblocksoutstring!=NULL) {
+		bblocksoutfile=bblocksoutstring;
 		fprintf(stdout,"Badblocks output: %s\n",bblocksoutfile);
 	}
 
@@ -472,9 +605,11 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"Seek script (fallback): %s\n",seekscriptfile);
 	}
 
-	marker=NULL;
 	if (arglist_arggiven(carglist,"-M")==0) {
-		marker=arglist_parameter(carglist,"-M",0);
+		failuredefstring=arglist_parameter(carglist,"-M",0);
+	}
+	if (failuredefstring!=NULL) {
+		marker=failuredefstring;
 		fprintf(stdout,"Marker string: %s\n",marker);
 	}
 
@@ -483,7 +618,7 @@ int main(int argc, char ** argv) {
 		startoffset=arglist_integer(arglist_parameter(carglist,"-s",0));
 	}
 	if (startoffset<1) startoffset=0;
-	fprintf(stdout,"Starting block: %lu\n",startoffset);
+	fprintf(stdout,"Starting block: %llu\n",startoffset);
 	
 	length=0;
 	if (arglist_arggiven(carglist,"-l")==0) {
@@ -491,7 +626,7 @@ int main(int argc, char ** argv) {
 	}
 	if (length<1) length=-1;
 	if (length>=0) {
-		fprintf(stdout,"Size limit (blocks): %lu\n",length);
+		fprintf(stdout,"Size limit (blocks): %llu\n",length);
 	}
 	startoffset=startoffset*blocksize;
 	length=length*blocksize;
@@ -499,11 +634,7 @@ int main(int argc, char ** argv) {
 		filesize=startoffset+length;
 	}
 
-	if (blocksize>=faultblocksize) {
-		databuffer=(char*)malloc((blocksize+1)*sizeof(char));
-	} else {
-		databuffer=(char*)malloc((faultblocksize+1)*sizeof(char));
-	}
+	databuffer=(char*)malloc((blocksize+1)*sizeof(char));
 	if (databuffer==NULL) {
 		perror("MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER");
 		return 2;
@@ -675,10 +806,10 @@ int main(int argc, char ** argv) {
 				if (incremental) {
 					// Incremental mode. Skip over unnecessary areas.
 					// check wether the current block is in the badblocks list, 
-					// if so, (or a read error condition) proceed as usual,
+					// if so, proceed as usual,
 					// otherwise seek to the next badblock in input
 					tmp_pos=(readposition+startoffset)/iblocksize;
-					if (tmp_pos>lastsourceblock && newerror>0) {
+					if (tmp_pos>lastsourceblock) {
 						tmp=NULL;
 						do {
 							tmp=fgets(textbuffer,64,bblocksin);
@@ -697,6 +828,24 @@ int main(int argc, char ** argv) {
 								remain=0;
 								break;
 							}
+						}
+						if (newerror==0 && tmp_pos!=lastsourceblock) {
+							// If we jumped position
+							// but were recently skipping over a bad area
+							// end bad area handling and start normal read
+							// (code copy pasted from
+							//  similar section in xblock handling below)
+							newerror=retries;
+							tmp_pos=readposition/blocksize;
+							tmp_bytes=readposition-lastgood;
+							damagesize+=tmp_bytes;
+							sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
+							write(1,textbuffer,strlen(textbuffer));
+							if (human) write(2,&"\n",1);
+							output=1;
+							linewidth=0;
+							backtracemode=0;
+							lasterror=readposition;
 						}
 						readposition=(lastsourceblock*iblocksize)-startoffset;
 					}
@@ -761,8 +910,14 @@ int main(int argc, char ** argv) {
 				seekable=1;
 			} else {
 				// seek failed, check why
-				if (errno==EINVAL && seekable==1) {
-					// tried to seek past the end of file. End reading.
+				errtmp=errno;
+				if ((readposition+startoffset)<filesize && lowlevel_canseek() && (lowlevel==2 || (lowlevel==1 && desperate))) {
+					// lowlevel operation will take care of seeking.
+					// and can do it
+					cposition=readposition+startoffset;
+					sposition=cposition;
+				} else if (errtmp==EINVAL && seekable==1) {
+					// tried to seek past the end of file.
 					break;
 				} else {
 					// input file is not seekable!
@@ -840,12 +995,16 @@ int main(int argc, char ** argv) {
 		if (wantabort) break;
 // 6.d input - attempt to read from sourcefile
 		// read input data
+		// to limit memory usage do not allow to read chunks bigger
+		// than one block, even if faultskipsize is set
+		maxremain=remain;
+		if (maxremain>blocksize) maxremain=blocksize;
 		if (lowlevel==0 || (lowlevel==1 && !desperate)) {
-			block=read(source,databuffer,remain);
+			block=read(source,databuffer,maxremain);
 		} else {
 			//desperate mode means we are allowed to use low lvl 
 			//IO syscalls to work around read errors
-			block=read_desperately(sourcefile,&source,databuffer,sposition,remain,seekable,desperate,syncmode);
+			block=read_desperately(sourcefile,&source,databuffer,sposition,maxremain,seekable,desperate,syncmode);
 		}
 		// time reading for quality calculation
 		gettimeofday(&newtime,NULL);
@@ -1081,20 +1240,38 @@ int main(int argc, char ** argv) {
 						}
 					}
 
-					// skip ahead(virtually)
+					// skip ahead(virtually) - do not skip over file end
+					// all the special handling of the filesize position is necessary because
+					// we do not want to grow the target file beyond the size of the source
+					// even if its end is unreadable.
+					// however a seek to exactly the end of a file will still succeed,
+					// while its not guaranteed to get a zero byte succesfull read (EOF)
+					// when using low level hardware access
+					// (addressing disk areas beyond end of disk is usually possible
+					// on low level)
+					// therefore a single one byte block will be issued to be read past the end
+					// which will NOT be marked in the destination file
+					// thus causing a seek error on the next read attempt - ending execution
+					// anything beyond that indicates the reported filesize was too short
+					// so we again will mark bad blocks
+					if ((readposition+startoffset)<filesize && remain>filesize-(readposition+startoffset)) {
+						remain=filesize-(readposition+startoffset);
+					} else if((readposition+startoffset)==filesize && filesize>0) {
+						remain=1;
+					}
 					readposition+=remain;
 					if (!backtracemode) {
-						if (marker) {
+						if (marker && (filesize==0 || (readposition+startoffset)!=filesize+1 || remain>1)) {
 							// if a marker is given, we need to write it to the
 							// destination at the current position
 							// first copy the marker into the data buffer
 							writeoffset=0;
 							writeremain=strlen(marker);
-							while (writeoffset+writeremain<remain) {
+							while (writeoffset+writeremain<blocksize) {
 								memcpy(databuffer+writeoffset,marker,writeremain);
 								writeoffset+=writeremain;
 							}
-							memcpy(databuffer+writeoffset,marker,remain-writeoffset);
+							memcpy(databuffer+writeoffset,marker,blocksize-writeoffset);
 							// now write it to disk
 							writeremain=remain;
 							writeoffset=0;
@@ -1123,7 +1300,7 @@ int main(int argc, char ** argv) {
 									arglist_kill(carglist);
 									return 2;
 								}
-								writeblock=write(destination,databuffer+writeoffset,writeremain);
+								writeblock=write(destination,databuffer+(writeoffset % blocksize),(blocksize>writeremain?writeremain:blocksize));
 								if (writeblock<=0) {
 									fprintf(stderr,"\nError: write to %s failed",destfile);
 									perror("");

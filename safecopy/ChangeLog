@@ -32,3 +32,13 @@
 - Correct sector address calculation in raw mode acces on different types of CDs
 - Floppy low level IO now supports twaddle syscall
 - Man page added to documentation
+
+2009.05.06
+- Added support for autodetecting true hardware block and disk sizes using low level calls on CDs
+- Added support for relative sizes in command line option (e.g. -f 10% )
+- Added command line presets for multi staged data rescue that set sensible, overridable defaults.
+- Fixed problem that lead to previously rescued parts of a file being overwritten with bad block marker data during an incremental run in case of read errors just past the end of a known bad area (bad area grew)
+- Limited dynamic memory allocation to one block, regardless of fault skip block size used.
+- Altered behaviour of bad block marker code to keep destination file size equal to source file size, even if the end of the source is unreadable and needs to be skipped.
+- Command line help is now written to stdout instead of stderr
+
