@@ -73,17 +73,17 @@ void usage(char * name) {
 	fprintf(stdout,"Options:\n");
 	fprintf(stdout,"	--stage1 : Preset to rescue most of the data fast,\n");
 	fprintf(stdout,"	           using no retries and avoiding bad areas.\n");
-	fprintf(stdout,"	           Implies: -f 10%% -r 10%% -R 1 -Z 0 -L 2 -M %s\n",FAILSTRING);
+	fprintf(stdout,"	           Presets: -f 10%% -r 10%% -R 1 -Z 0 -L 2 -M %s\n",FAILSTRING);
 	fprintf(stdout,"	                    -o stage1.badblocks\n");
 	fprintf(stdout,"	--stage2 : Preset to rescue more data, using no retries\n");
 	fprintf(stdout,"	           but searching for exact ends of bad areas.\n");
-	fprintf(stdout,"	           Implies: -f 1%% -r 1* -R 1 -Z 0 -L 2\n");
+	fprintf(stdout,"	           Presets: -f 128* -r 1* -R 1 -Z 0 -L 2\n");
 	fprintf(stdout,"	                    -I stage1.badblocks\n");
 	fprintf(stdout,"	                    -o stage2.badblocks\n");
 	fprintf(stdout,"	--stage3 : Preset to rescue everything that can be rescued\n");
 	fprintf(stdout,"	           using maximum retries, head realignment tricks\n");
 	fprintf(stdout,"	           and low level access.\n");
-	fprintf(stdout,"	           Implies: -f 1* -r 1* -R 4 -Z 1 -L 2\n");
+	fprintf(stdout,"	           Presets: -f 1* -r 1* -R 4 -Z 1 -L 2\n");
 	fprintf(stdout,"	                    -I stage2.badblocks\n");
 	fprintf(stdout,"	                    -o stage3.badblocks\n");
 	fprintf(stdout,"	-b <size> : Blocksize for default read operations.\n");
@@ -163,6 +163,9 @@ void usage(char * name) {
 	fprintf(stdout,"	              skipping / zero-padding it. This helps in later\n");
 	fprintf(stdout,"	              finding affected files on file system images\n");
 	fprintf(stdout,"	              that couldn't be rescued completely.\n");
+	fprintf(stdout,"	              Warning: Using this in combination with\n");
+	fprintf(stdout,"	              incremental mode (-I) will overwrite data\n");
+	fprintf(stdout,"	              in the destination file.\n");
 	fprintf(stdout,"	              Default: none\n");
 	fprintf(stdout,"	-h | --help : Show this text\n\n");
 	fprintf(stdout,"Valid parameters for -f -r -b <size> options are:\n");
@@ -325,6 +328,46 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 	return (old+(blocksize*WEXITSTATUS(status)));
 }
 
+// function to mark bad blocks in output
+void markbadblocks(int destination, off_t writeposition, off_t remain, char* marker, char* databuffer, off_t blocksize)
+{
+	off_t writeoffset,writeremain,writeblock,cposition;
+	if (remain<=0) {
+		return;
+	}
+	// if a marker is given, we need to write it to the
+	// destination at the current position
+	// first copy the marker into the data buffer
+	writeoffset=0;
+	writeremain=strlen(marker);
+	while (writeoffset+writeremain<blocksize) {
+		memcpy(databuffer+writeoffset,marker,writeremain);
+		writeoffset+=writeremain;
+	}
+	memcpy(databuffer+writeoffset,marker,blocksize-writeoffset);
+	// now write it to disk
+	writeremain=remain;
+	writeoffset=0;
+	while (writeremain>0) {
+		// write data to destination file
+		cposition=lseek(destination,writeposition,SEEK_SET);
+		if (cposition<0) {
+			fprintf(stderr,"\nError: seek() in output failed");
+			perror("");
+			return;
+		}
+		writeblock=write(destination,databuffer+(writeoffset % blocksize),(blocksize>writeremain?writeremain:blocksize));
+		if (writeblock<=0) {
+			fprintf(stderr,"\nError: write to output failed");
+			perror("");
+			return;
+		}
+		writeremain-=writeblock;
+		writeoffset+=writeblock;
+		writeposition+=writeblock;
+	}
+}
+
 // main
 int main(int argc, char ** argv) {
 
@@ -373,7 +416,7 @@ int main(int argc, char ** argv) {
 	int human=0;
 
 	// error indicators and flags
-	off_t softerr,harderr,lasterror,lastgood;
+	off_t softerr,harderr,lasterror,lastgood,lastmarked;
 	// tmp vars for file offsets
 	off_t tmp_pos,tmp_bytes;
 	// variables to remember beginning and end of previous good/bad area
@@ -442,7 +485,7 @@ int main(int argc, char ** argv) {
 		bblocksoutstring="stage1.badblocks";
 	}
 	if (arglist_arggiven(carglist,"--stage2")==0 || arglist_integer(arglist_parameter(carglist,"--stage",0))==2) {
-		faultblocksizestring="1%";
+		faultblocksizestring="128*";
 		resolutionstring="1*";
 		retriesdef=1;
 		headmovedef=0;
@@ -743,6 +786,7 @@ int main(int argc, char ** argv) {
 	newsofterror=0; //flag that indicates previous read failures on the current block
 	lasterror=0; //address of the last encountered bad area in source file
 	lastgood=0; //address of the last encountered succesfull read in source file
+	lastmarked=0; //last known address already marked in output file
 	lastbadblock=-1; //most recently encountered block for output badblock file
 	lastxblock=-1; //most recently encountered block number from input exclude file
 	lastsourceblock=-1; //most recently encountered block number from input badblock file
@@ -809,11 +853,13 @@ int main(int argc, char ** argv) {
 					// if so, proceed as usual,
 					// otherwise seek to the next badblock in input
 					tmp_pos=(readposition+startoffset)/iblocksize;
+					tmp_bytes=lastsourceblock;
 					if (tmp_pos>lastsourceblock) {
 						tmp=NULL;
 						do {
 							tmp=fgets(textbuffer,64,bblocksin);
 							if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
+							if (lastsourceblock==tmp_bytes+1) tmp_bytes=lastsourceblock;
 						} while (tmp!=NULL && lastsourceblock<tmp_pos );
 						if (tmp==NULL) {
 							// no more bad blocks in input file
@@ -833,6 +879,19 @@ int main(int argc, char ** argv) {
 							// If we jumped position
 							// but were recently skipping over a bad area
 							// end bad area handling and start normal read
+							// important: marking bad blocks here MUST NOT overwrite
+							// any data in destination file that is not covered by
+							// blocks in include file
+							if (marker) {
+								if ((tmp_bytes+1)*iblocksize>(readposition+startoffset)) {
+									markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
+									lastmarked=readposition;
+								} else {
+									tmp_bytes=((tmp_bytes+1)*iblocksize)-startoffset;
+									markbadblocks(destination,lastmarked,tmp_bytes-lastmarked,marker,databuffer,blocksize);
+									lastmarked=tmp_bytes;
+								}
+							}
 							// (code copy pasted from
 							//  similar section in xblock handling below)
 							newerror=retries;
@@ -881,6 +940,10 @@ int main(int argc, char ** argv) {
 							linewidth=0;
 							backtracemode=0;
 							lasterror=readposition;
+							if (marker) {
+								markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
+								lastmarked=readposition;
+							}
 							// restore overwritten var
 							tmp_pos=lastxblock;
 						}
@@ -1104,6 +1167,10 @@ int main(int argc, char ** argv) {
 					linewidth=0;
 					backtracemode=0;
 					lasterror=readposition;
+					if (marker) {
+						markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
+						lastmarked=readposition;
+					}
 				}
 				
 			} else {
@@ -1213,6 +1280,7 @@ int main(int argc, char ** argv) {
 						// (next block boundary)
 						remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
 						lastgood=readposition;
+						lastmarked=readposition;
 					} 
 
 					if (!backtracemode) {
@@ -1238,85 +1306,15 @@ int main(int argc, char ** argv) {
 								tmp_pos++;
 							}
 						}
+						if (marker) {
+							markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
+							lastmarked=readposition;
+						}
 					}
 
-					// skip ahead(virtually) - do not skip over file end
-					// all the special handling of the filesize position is necessary because
-					// we do not want to grow the target file beyond the size of the source
-					// even if its end is unreadable.
-					// however a seek to exactly the end of a file will still succeed,
-					// while its not guaranteed to get a zero byte succesfull read (EOF)
-					// when using low level hardware access
-					// (addressing disk areas beyond end of disk is usually possible
-					// on low level)
-					// therefore a single one byte block will be issued to be read past the end
-					// which will NOT be marked in the destination file
-					// thus causing a seek error on the next read attempt - ending execution
-					// anything beyond that indicates the reported filesize was too short
-					// so we again will mark bad blocks
-					if ((readposition+startoffset)<filesize && remain>filesize-(readposition+startoffset)) {
-						remain=filesize-(readposition+startoffset);
-					} else if((readposition+startoffset)==filesize && filesize>0) {
-						remain=1;
-					}
+					// skip ahead(virtually)
 					readposition+=remain;
 					if (!backtracemode) {
-						if (marker && (filesize==0 || (readposition+startoffset)!=filesize+1 || remain>1)) {
-							// if a marker is given, we need to write it to the
-							// destination at the current position
-							// first copy the marker into the data buffer
-							writeoffset=0;
-							writeremain=strlen(marker);
-							while (writeoffset+writeremain<blocksize) {
-								memcpy(databuffer+writeoffset,marker,writeremain);
-								writeoffset+=writeremain;
-							}
-							memcpy(databuffer+writeoffset,marker,blocksize-writeoffset);
-							// now write it to disk
-							writeremain=remain;
-							writeoffset=0;
-							if (sposition<startoffset) {
-								// handle cases where unwanted data has been read doe to seek error
-								if ((sposition+block)<=startoffset) {
-									// we read data we are supposed to skip! Ignore.
-									writeremain=0;
-								} else {
-									// partial skip
-									writeremain=(sposition+block)-startoffset;
-									writeoffset=startoffset-sposition;
-								}
-							}
-							while (writeremain>0) {
-								// write data to destination file
-								cposition=lseek(destination,writeposition,SEEK_SET);
-								if (cposition<0) {
-									fprintf(stderr,"\nError: seek() in %s failed",destfile);
-									perror("");
-									close(destination);
-									close(source);
-									if (incremental==1) fclose(bblocksin);
-									if (excluding==1) fclose(xblocksin);
-									if (bblocksoutfile!=NULL) close(bblocksout);
-									arglist_kill(carglist);
-									return 2;
-								}
-								writeblock=write(destination,databuffer+(writeoffset % blocksize),(blocksize>writeremain?writeremain:blocksize));
-								if (writeblock<=0) {
-									fprintf(stderr,"\nError: write to %s failed",destfile);
-									perror("");
-									close(destination);
-									close(source);
-									if (incremental==1) fclose(bblocksin);
-									if (excluding==1) fclose(xblocksin);
-									if (bblocksoutfile!=NULL) close(bblocksout);
-									arglist_kill(carglist);
-									return 2;
-								}
-								writeremain-=writeblock;
-								writeoffset+=writeblock;
-								writeposition+=writeblock;
-							}
-						}
 						// force re-calculation of next blocksize to fix
 						// block misalignment caused by partial data reading.
 						// doing so during backtrace would cause an infinite loop.
@@ -1369,6 +1367,19 @@ int main(int argc, char ** argv) {
 	fflush(stdout);
 	fflush(stderr);
 	if (newerror==0) {
+		// mark badblocks in output
+		if (marker) {
+			if (!incremental || (lastsourceblock+1)*iblocksize>(readposition+startoffset)) {
+				if (lastmarked<filesize && readposition>=filesize) {
+					markbadblocks(destination,lastmarked,filesize-lastmarked,marker,databuffer,blocksize);
+				} else {
+					markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
+				}
+			} else {
+				tmp_bytes=((lastsourceblock+1)*iblocksize)-startoffset;
+				markbadblocks(destination,lastmarked,tmp_bytes-lastmarked,marker,databuffer,blocksize);
+			}
+		}
 		// if theres an error at the end of input, treat as if we had one succesfull read afterwards
 		tmp_pos=readposition/blocksize;
 		tmp_bytes=readposition-lastgood;
