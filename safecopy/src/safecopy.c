@@ -36,7 +36,18 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "arglist.h"
+
+#define DEBUG_FLOW 1
+#define DEBUG_IO 2
+#define DEBUG_BADBLOCKS 4
+#define DEBUG_SEEK 8
+#define DEBUG_INCREMENTAL 16
+#define DEBUG_EXCLUDE 32
+
+#define MARK_INCLUDING 1
+#define MARK_EXCLUDING 2
 
 #define FAILSTRING "BaDbLoCk"
 #define MAXBLOCKSIZE 104857600
@@ -66,6 +77,20 @@
 #define SLOW_ICON "  :-|"
 #define VERY_SLOW_ICON "  8-("
 #define VERY_VERY_SLOW_ICON "  8-X"
+
+static int debugmode=0;
+
+int debug(int debug,char *format,...) {
+	if (debugmode & debug) {
+		va_list ap;
+		int ret;
+		va_start(ap,format);
+		ret=vfprintf(stderr,format,ap);
+		va_end(ap);
+		return ret;
+	}
+	return 0;
+}
 
 void usage(char * name) {
 	fprintf(stdout,"Safecopy "VERSION" by CorvusCorax\n");
@@ -298,6 +323,7 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 	char thirdarg[128];
 	off_t delta=new-old;
 	int status;
+	debug(DEBUG_SEEK,"debug: emergency seek");
 	// do nothing if no seek is necessary
 	if (new==old) return old;
 	// do nothing if no script is given
@@ -332,16 +358,24 @@ off_t emergency_seek(off_t new,off_t old,off_t blocksize, char* script) {
 void markbadblocks(int destination, off_t writeposition, off_t remain, char* marker, char* databuffer, off_t blocksize)
 {
 	off_t writeoffset,writeremain,writeblock,cposition;
+	char nullmarker[8]={0};
 	if (remain<=0) {
+		debug(DEBUG_BADBLOCKS,"debug: no bad blocks to mark\n");
 		return;
 	}
+	debug(DEBUG_BADBLOCKS,"debug: marking %llu bad bytes at %llu\n",remain,writeposition);
 	// if a marker is given, we need to write it to the
 	// destination at the current position
 	// first copy the marker into the data buffer
 	writeoffset=0;
 	writeremain=strlen(marker);
+	if (writeremain==0) writeremain=8;
 	while (writeoffset+writeremain<blocksize) {
-		memcpy(databuffer+writeoffset,marker,writeremain);
+		if (writeremain!=0) {
+			memcpy(databuffer+writeoffset,marker,writeremain);
+		} else {
+			memcpy(databuffer+writeoffset,nullmarker,writeremain);
+		}
 		writeoffset+=writeremain;
 	}
 	memcpy(databuffer+writeoffset,marker,blocksize-writeoffset);
@@ -350,12 +384,14 @@ void markbadblocks(int destination, off_t writeposition, off_t remain, char* mar
 	writeoffset=0;
 	while (writeremain>0) {
 		// write data to destination file
+		debug(DEBUG_SEEK,"debug: seek in destination file: %llu\n",writeposition);
 		cposition=lseek(destination,writeposition,SEEK_SET);
 		if (cposition<0) {
 			fprintf(stderr,"\nError: seek() in output failed");
 			perror("");
 			return;
 		}
+		debug(DEBUG_IO,"debug: writing badblock marker to destination file: %llu bytes at %llu\n",writeremain,cposition);
 		writeblock=write(destination,databuffer+(writeoffset % blocksize),(blocksize>writeremain?writeremain:blocksize));
 		if (writeblock<=0) {
 			fprintf(stderr,"\nError: write to output failed");
@@ -366,6 +402,167 @@ void markbadblocks(int destination, off_t writeposition, off_t remain, char* mar
 		writeoffset+=writeblock;
 		writeposition+=writeblock;
 	}
+}
+
+// write blocks to badblock file - up to but not including given position
+void outputbadblocks(off_t start,off_t limit,int bblocksout,off_t *lastbadblock,off_t startoffset, off_t blocksize, char* textbuffer) {
+	off_t tmp_pos;
+	// write badblocks to file if requested
+	// start at first bad block in current bad set
+	tmp_pos=(start/blocksize);
+	// override that with the first not yet written one
+	if (*lastbadblock>=tmp_pos) {
+		tmp_pos=*lastbadblock+1;
+	}
+	// then write all blocks that are smaller than the current one
+	// note the calculation takes into account wether
+	// the current block STARTS in a error but is ok here 
+	// (which wouldnt be the case if we compared tmp_pos directly)
+	while ((tmp_pos*blocksize)<limit) {
+		*lastbadblock=tmp_pos;
+		sprintf(textbuffer,"%llu\n",*lastbadblock);
+		debug(DEBUG_BADBLOCKS,"debug: declaring bad block: %llu\n",*lastbadblock);
+		write(bblocksout,textbuffer,strlen(textbuffer));
+		tmp_pos++;
+	}
+}
+
+// function to mark a given section in both destination file (badblock marking) and badblock output
+void realmarkoutput (off_t start, off_t end, off_t min, off_t max, off_t startoffset, off_t blocksize, off_t *lastbadblock, off_t * lastmarked, char* marker, char* databuffer, char* textbuffer,int bblocksout, char* bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding) {
+	off_t first=start;
+	off_t last=end;
+	char * tmp;
+	off_t tmp_pos;
+	if (min+startoffset>first) first=min+startoffset;
+	if (max+startoffset<last) last=max+startoffset;
+
+	if (excluding) {
+
+		// Exclusion mode, check relevant exclude sectors whether they affect the current position
+		// first check if we need to backtrack in exclude file.
+		debug(DEBUG_EXCLUDE,"debug: checking for exclude blocks during output, at position %llu\n",first);
+		if (first<*lastxblock*xblocksize) {
+			debug(DEBUG_EXCLUDE,"debug: possibly need backtracking in exclude list, next exclude block %lli\n",*lastxblock);
+			if (first<*previousxblock*xblocksize) {
+				// we read too far in exclude block file, probably after backtracking
+				// close exclude file and reopen
+				debug(DEBUG_EXCLUDE,"debug: reopening exclude file and reading from the start\n");
+				fclose(*xblocksin);
+				*xblocksin=fopen(xblocksinfile,"r");
+				if (*xblocksin==NULL) {
+					fprintf(stderr,"Error reopening exclusion badblock file for reading: %s",xblocksinfile);
+					perror("");
+					*previousxblock=((unsigned)-1)>>1;
+					*lastxblock=((unsigned)-1)>>1;
+					return;
+				}
+				*lastxblock=-1;
+				*previousxblock=-1;
+			} else if((*previousxblock+1)*xblocksize>first) {
+				// backtrack just one exclude block
+				*lastxblock=*previousxblock;
+				debug(DEBUG_EXCLUDE,"debug: using last exclude block %lli\n",*lastxblock);
+			} else {
+				debug(DEBUG_EXCLUDE,"debug: false alarm, current exclude block is fine\n");
+			}
+		}
+		tmp_pos = *lastxblock*xblocksize;
+		while (tmp_pos<last) {
+			if (tmp_pos+xblocksize>first) {
+				if (tmp_pos<=first) {
+					// start of current block is covered by exclude block. skip to end and try again
+					first=tmp_pos+xblocksize;
+					if (first>last) {
+						debug(DEBUG_EXCLUDE,"debug: current bad block area is completely covered by xblocks, skipping\n");
+						return;
+					}
+					debug(DEBUG_EXCLUDE,"debug: start of current bad block area is covered by xblocks shrinking\n");
+					realmarkoutput(first,last,first-startoffset,last-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+					
+					return;
+				} else if(tmp_pos<last) {
+					// 
+// ATTENTION: there could be a reamaining part behind this xblock - needs two recursive calls to self to fix!
+					debug(DEBUG_EXCLUDE,"debug: current bad block area is partially covered by xblocks, splitting\n");
+					realmarkoutput(first,tmp_pos,first-startoffset,tmp_pos-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+					realmarkoutput(tmp_pos,last,tmp_pos-startoffset,last-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+					return;
+				} else {
+					// start of exclude block is beyond end of our area. we are done
+					break;
+				}
+			} else {
+				// read next exclude block
+				tmp=fgets(textbuffer,64,*xblocksin);
+				if (sscanf(textbuffer,"%llu",&tmp_pos)!=1) tmp=NULL;
+				if (tmp==NULL) {
+					// no more bad blocks in input file
+					break;
+				}
+				*previousxblock=*lastxblock;
+				*lastxblock=tmp_pos;
+				tmp_pos=*lastxblock*xblocksize;
+			}
+		}
+	}
+
+	if (marker) {
+		debug(DEBUG_BADBLOCKS,"debug: marking badblocks from %llu to %llu \n",first,last);
+		if (*lastmarked<first-startoffset) {
+			*lastmarked=first-startoffset;
+		}
+		markbadblocks(destination,*lastmarked,last-(*lastmarked+startoffset),marker,databuffer,blocksize);
+	}
+	if (bblocksoutfile!=NULL) {
+		debug(DEBUG_BADBLOCKS,"debug: declaring badblocks from %llu to %llu \n",first,last);
+
+		outputbadblocks(first,last,bblocksout,lastbadblock,startoffset,blocksize,textbuffer);
+	}
+}
+
+// function to mark output - taking include file information into account to not touch not mentioned blocks
+void markoutput(char* description,off_t readposition, off_t startoffset, off_t blocksize, off_t targetsize, off_t lastgood, off_t * lastbadblock, off_t *lastmarked, char* marker, char* databuffer,char *textbuffer, int incremental, FILE *bblocksin, off_t iblocksize, off_t *lastsourceblock,int bblocksout,char *bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding) {
+	off_t tmp_pos;
+	char *tmp;
+
+	tmp_pos=lastgood+startoffset;
+	// check for incremental mode in incremental mode, handle only sectors mentioned in include file
+	// for marking, the include sector alignments are relevant, for badblock output the affected blocks
+	// in our blocksize
+	if (incremental) {
+		off_t inc_pos= *lastsourceblock*iblocksize;
+		// repeat as long as 
+		while (inc_pos<readposition+startoffset) {
+			if (inc_pos+iblocksize>tmp_pos) {
+				debug(DEBUG_BADBLOCKS,"debug: %s %llu - %llu - marking output for infile block %lli (%llu - %llu)\n",description,tmp_pos,readposition+startoffset,inc_pos/iblocksize,inc_pos,inc_pos+iblocksize);
+				realmarkoutput(inc_pos,inc_pos+iblocksize,lastgood,readposition,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+			}
+			if(inc_pos+iblocksize>readposition+startoffset) {
+				// do not read in another include block
+				// if the current one is still good for future use.
+				break;
+			}
+			tmp=fgets(textbuffer,64,bblocksin);
+			if (sscanf(textbuffer,"%llu",lastsourceblock)!=1) tmp=NULL;
+			if (tmp==NULL) {
+				// no more bad blocks in input file
+				// if exists
+				if ((readposition+startoffset)<targetsize) {
+					// go to end of target file for resuming
+					*lastsourceblock=targetsize/iblocksize;
+				} else if (targetsize) {
+					*lastsourceblock=(readposition+startoffset)/iblocksize;
+				} else {
+					break;
+				}
+			}
+			inc_pos= *lastsourceblock*iblocksize;
+		}
+	} else {
+		debug(DEBUG_BADBLOCKS,"debug: %s %llu - %llu - marking output for whole bad area\n",description,tmp_pos,readposition+startoffset);
+		realmarkoutput(tmp_pos,readposition+startoffset,lastgood,readposition,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+	}
+
 }
 
 // main
@@ -404,7 +601,7 @@ int main(int argc, char ** argv) {
 	// buffer pointer for sfgets() 
 	char *tmp;
 	// pointer to marker string
-	char *marker;
+	char *marker=NULL;
 	// several local integer variables
 	off_t fsblocksize,blocksize,iblocksize,xblocksize,faultblocksize;
 	off_t resolution;
@@ -420,7 +617,7 @@ int main(int argc, char ** argv) {
 	// tmp vars for file offsets
 	off_t tmp_pos,tmp_bytes;
 	// variables to remember beginning and end of previous good/bad area
-	off_t lastbadblock,lastxblock,lastsourceblock;
+	off_t lastbadblock,lastxblock,previousxblock,lastsourceblock;
 	// stat() needs this
 	struct stat filestatus;
 	// input filesize and size of unreadable area
@@ -442,6 +639,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"--stage1",0);
 	arglist_addarg (carglist,"--stage2",0);
 	arglist_addarg (carglist,"--stage3",0);
+	arglist_addarg (carglist,"--debug",1);
 	arglist_addarg (carglist,"--help",0);
 	arglist_addarg (carglist,"-h",0);
 	arglist_addarg (carglist,"--sync",0);
@@ -464,6 +662,9 @@ int main(int argc, char ** argv) {
 	// find out wether the user is wetware
 	human=(isatty(1) & isatty(2));
 	
+	if ((arglist_arggiven(carglist,"--debug")==0)) {
+		debugmode=arglist_integer(arglist_parameter(carglist,"--debug",0));
+	}
 	if ((arglist_arggiven(carglist,"--help")==0)
 			|| (arglist_arggiven(carglist,"-h")==0)
 			|| (arglist_parameter(carglist,"VOIDARGS",2)!=NULL)
@@ -789,6 +990,7 @@ int main(int argc, char ** argv) {
 	lastmarked=0; //last known address already marked in output file
 	lastbadblock=-1; //most recently encountered block for output badblock file
 	lastxblock=-1; //most recently encountered block number from input exclude file
+	previousxblock=-1; //2nd most recently encountered block number from input exclude file
 	lastsourceblock=-1; //most recently encountered block number from input badblock file
 	damagesize=0; //counter for size of unreadable source file data
 	backtracemode=0; //flag that indicates safecopy is searching for the end of a bad area
@@ -841,124 +1043,133 @@ int main(int argc, char ** argv) {
 
 // 6.a planning - calculate wanted read position based on include/exclude input files
 
+		debug(DEBUG_FLOW,"debug: start of cycle\n");
 		// start with a whole new block if we finnished the old
 		if (remain==0) {
-			do {
-				// if necessary, repeatedly calculate include and exclude blocks
-				// (for example if we seek to a new include block, but then exclude it,
-				// so we seek to the next, then exclude it, etc)
-				if (incremental) {
-					// Incremental mode. Skip over unnecessary areas.
-					// check wether the current block is in the badblocks list, 
-					// if so, proceed as usual,
-					// otherwise seek to the next badblock in input
-					tmp_pos=(readposition+startoffset)/iblocksize;
-					tmp_bytes=lastsourceblock;
-					if (tmp_pos>lastsourceblock) {
-						tmp=NULL;
-						do {
-							tmp=fgets(textbuffer,64,bblocksin);
-							if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
-							if (lastsourceblock==tmp_bytes+1) tmp_bytes=lastsourceblock;
-						} while (tmp!=NULL && lastsourceblock<tmp_pos );
-						if (tmp==NULL) {
-							// no more bad blocks in input file
-							// if exists
-							if ((readposition+startoffset)<targetsize) {
-								// go to end of target file for resuming
-								lastsourceblock=targetsize/iblocksize;
-							} else if (targetsize) {
-								lastsourceblock=tmp_pos;
-							} else {
-								// othewise end immediately
-								remain=0;
-								break;
-							}
-						}
-						if (newerror==0 && tmp_pos!=lastsourceblock) {
-							// If we jumped position
-							// but were recently skipping over a bad area
-							// end bad area handling and start normal read
-							// important: marking bad blocks here MUST NOT overwrite
-							// any data in destination file that is not covered by
-							// blocks in include file
-							if (marker) {
-								if ((tmp_bytes+1)*iblocksize>(readposition+startoffset)) {
-									markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
-									lastmarked=readposition;
-								} else {
-									tmp_bytes=((tmp_bytes+1)*iblocksize)-startoffset;
-									markbadblocks(destination,lastmarked,tmp_bytes-lastmarked,marker,databuffer,blocksize);
-									lastmarked=tmp_bytes;
-								}
-							}
-							// (code copy pasted from
-							//  similar section in xblock handling below)
-							newerror=retries;
-							tmp_pos=readposition/blocksize;
-							tmp_bytes=readposition-lastgood;
-							damagesize+=tmp_bytes;
-							sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
-							write(1,textbuffer,strlen(textbuffer));
-							if (human) write(2,&"\n",1);
-							output=1;
-							linewidth=0;
-							backtracemode=0;
-							lasterror=readposition;
-						}
-						readposition=(lastsourceblock*iblocksize)-startoffset;
-					}
-				}
-				if (excluding) {
-					// Exclusion mode, read next new exclusion block
-					// from badblocks file, if we are already read past it
-					tmp_pos=(readposition+startoffset)/xblocksize;
-					if (tmp_pos>lastxblock) {
-						tmp=NULL;
-						do {
-							tmp=fgets(textbuffer,64,xblocksin);
-							if (sscanf(textbuffer,"%llu",&lastxblock)!=1) tmp=NULL;
-						} while (tmp!=NULL && lastxblock<tmp_pos );
-						if (tmp==NULL) {
-							// no more bad blocks in input file
-							excluding=0;
-							lastxblock=-1;
+			debug(DEBUG_FLOW,"debug: preparing to read a new block\n");
+			// if necessary, repeatedly calculate include and exclude blocks
+			// (for example if we seek to a new include block, but then exclude it,
+			// so we seek to the next, then exclude it, etc)
+			if (incremental && newerror!=0) {
+				debug(DEBUG_INCREMENTAL,"debug: incremental - searching next block\n");
+				// Incremental mode. Skip over unnecessary areas.
+				// check wether the current block is in the badblocks list, 
+				// if so, proceed as usual,
+				// otherwise seek to the next badblock in input
+				tmp_pos=(readposition+startoffset)/iblocksize;
+				if (tmp_pos>lastsourceblock) {
+					tmp=NULL;
+					do {
+						tmp=fgets(textbuffer,64,bblocksin);
+						if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
+					} while (tmp!=NULL && lastsourceblock<tmp_pos );
+					if (tmp==NULL) {
+						// no more bad blocks in input file
+						// if exists
+						if ((readposition+startoffset)<targetsize) {
+							// go to end of target file for resuming
+							lastsourceblock=targetsize/iblocksize;
+						} else if (targetsize) {
+							lastsourceblock=tmp_pos;
+						} else {
+							// othewise end immediately
+							remain=0;
+							break;
 						}
 					}
-					if (tmp_pos==lastxblock) {
-						// we have a match, clean up, then skip this block
-						if (newerror==0) {
-							// clean up
-							newerror=retries;
-							tmp_pos=readposition/blocksize;
-							tmp_bytes=readposition-lastgood;
-							damagesize+=tmp_bytes;
-							sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
-							write(1,textbuffer,strlen(textbuffer));
-							if (human) write(2,&"\n",1);
-							output=1;
-							linewidth=0;
-							backtracemode=0;
-							lasterror=readposition;
-							if (marker) {
-								markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
-								lastmarked=readposition;
-							}
-							// restore overwritten var
-							tmp_pos=lastxblock;
-						}
-						readposition=((lastxblock+1)*xblocksize)-startoffset;
-					}
-				}
-				// make sure any misalignment to block boundaries get corrected asap
-				// be sure to use skipping size when in bad area
-				if (newerror==0) {
-					remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
+					debug(DEBUG_INCREMENTAL,"debug: incremental - target is %llu position is %llu\n",lastsourceblock,tmp_pos);
+					readposition=(lastsourceblock*iblocksize)-startoffset;
 				} else {
-					remain=(((readposition/blocksize)*blocksize)+blocksize)-readposition;
+					debug(DEBUG_INCREMENTAL,"debug: incremental - still in same block\n");
 				}
-			} while (excluding && tmp_pos==lastxblock);
-			// break from above jumps here, with remain=0
+			}
+			// make sure any misalignment to block boundaries get corrected asap
+			// be sure to use skipping size when in bad area
+			if (newerror==0) {
+				remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
+			} else {
+				remain=(((readposition/blocksize)*blocksize)+blocksize)-readposition;
+			}
+			debug(DEBUG_FLOW,"debug: prepared to read block %lli size %llu at %llu\n",(readposition+startoffset)/blocksize,remain,readposition+startoffset);
+		}
+		if (excluding && remain!=0) {
+			// Exclusion mode, check relevant exclude sectors whether they affect the current position
+			// first check if we need to backtrack in exclude file.
+			debug(DEBUG_EXCLUDE,"debug: checking for exclude blocks at position %llu\n",readposition+startoffset);
+			if (readposition+startoffset<lastxblock*xblocksize) {
+				debug(DEBUG_EXCLUDE,"debug: possibly need backtracking in exclude list, next exclude block %lli\n",lastxblock);
+				if (readposition+startoffset<previousxblock*xblocksize) {
+					// we read too far in exclude block file, probably after backtracking
+					// close exclude file and reopen
+					debug(DEBUG_EXCLUDE,"debug: reopening exclude file and reading from the start\n");
+					fclose(xblocksin);
+					xblocksin=fopen(xblocksinfile,"r");
+					if (xblocksin==NULL) {
+						excluding=0;
+						fprintf(stderr,"Error reopening exclusion badblock file for reading: %s",xblocksinfile);
+						perror("");
+						wantabort=1;
+						break;
+					}
+					lastxblock=-1;
+					previousxblock=-1;
+				} else if((previousxblock+1)*xblocksize>readposition+startoffset) {
+					// backtrack just one exclude block
+					lastxblock=previousxblock;
+					debug(DEBUG_EXCLUDE,"debug: using last exclude block %lli\n",lastxblock);
+				} else {
+					debug(DEBUG_EXCLUDE,"debug: false alarm, current exclude block is fine\n");
+				}
+			}
+			tmp_pos = lastxblock*xblocksize;
+			debug(DEBUG_EXCLUDE,"debug: checking with xblock %lli at %llu\n",lastxblock,tmp_pos);
+			tmp_bytes=0; // using this as indicator for restart
+			while (tmp_pos<readposition+startoffset+remain) {
+				if (tmp_pos+xblocksize>readposition+startoffset) {
+					if (tmp_pos<=readposition+startoffset) {
+						// start of current block is covered by exclude block. skip.
+						debug(DEBUG_EXCLUDE,"debug: skipping ahead to avoid exclude block\n");
+						tmp_bytes=1;
+						if (tmp_pos+xblocksize<readposition+startoffset+remain) {
+							remain=(tmp_pos+xblocksize)-(readposition+startoffset);
+							debug(DEBUG_EXCLUDE,"debug: remain set to %llu\n",remain);
+						} else {
+							if (!backtracemode) {
+								remain=0;
+							} else {
+								remain=1;
+								debug(DEBUG_EXCLUDE,"debug: remain set to %llu\n",remain);
+							}
+						}
+						readposition=(tmp_pos+xblocksize)-startoffset;
+						break;
+					} else if (tmp_pos<readposition+startoffset+remain) {
+						debug(DEBUG_EXCLUDE,"debug: shrinking block size because of exclude block from %llu to %llu\n",remain,(tmp_pos-(readposition+startoffset)));
+						remain=tmp_pos-(readposition+startoffset);
+						break;
+					} else {
+						// start of exclude block is beyond end of our area. we are done
+						break;
+					}
+				} else {
+					// read next exclude block
+					debug(DEBUG_EXCLUDE,"debug: reading another exclude block\n");
+					tmp=fgets(textbuffer,64,xblocksin);
+					if (sscanf(textbuffer,"%llu",&tmp_pos)!=1) tmp=NULL;
+					if (tmp==NULL) {
+						// no more bad blocks in input file
+						break;
+					}
+					previousxblock=lastxblock;
+					lastxblock=tmp_pos;
+					tmp_pos=lastxblock*xblocksize;
+					debug(DEBUG_EXCLUDE,"debug: reading another exclude block: %lli at %llu\n",lastxblock,tmp_pos);
+				}
+			}
+			if (tmp_bytes==1) {
+				debug(DEBUG_EXCLUDE,"debug: recalculation needed because of exclude blocks, restarting cycle\n");
+				continue;
+			}
 		}
 
 // 6.b navigation - attempt to seek to requested input file position and find out actual position
@@ -967,6 +1178,7 @@ int main(int argc, char ** argv) {
 		gettimeofday(&oldtime,NULL);
 		// seek only if the current file position differs from requested file position
 		if (sposition!=readposition+startoffset) {
+			debug(DEBUG_SEEK,"debug: seeking in input from %llu to %llu\n",sposition,readposition+startoffset);
 			cposition=lseek(source,readposition+startoffset,SEEK_SET);
 			if (cposition>0) {
 				sposition=cposition;
@@ -1063,10 +1275,12 @@ int main(int argc, char ** argv) {
 		maxremain=remain;
 		if (maxremain>blocksize) maxremain=blocksize;
 		if (lowlevel==0 || (lowlevel==1 && !desperate)) {
+			debug(DEBUG_IO,"debug: normal read\n");
 			block=read(source,databuffer,maxremain);
 		} else {
 			//desperate mode means we are allowed to use low lvl 
 			//IO syscalls to work around read errors
+			debug(DEBUG_IO,"debug: low level read\n");
 			block=read_desperately(sourcefile,&source,databuffer,sposition,maxremain,seekable,desperate,syncmode);
 		}
 		// time reading for quality calculation
@@ -1115,6 +1329,7 @@ int main(int argc, char ** argv) {
 // 6.f processing - react according to result of read operation
 // 6.f.1 succesfull read:
 		if (block>0) {
+			debug(DEBUG_IO,"debug: succesfull read\n");
 			sposition=sposition+block;
 			// successfull read, if happening during soft recovery
 			// (downscale or retry) list a single soft error
@@ -1135,26 +1350,8 @@ int main(int argc, char ** argv) {
 					output=1;
 					linewidth++;
 					backtracemode=1;
+					debug(DEBUG_FLOW,"debug: shrinking remain to %llu\n",remain);
 				} else {
-					if (bblocksoutfile!=NULL) {
-						// write badblocks to file if requested
-						// start at first bad block in current bad set
-						tmp_pos=((lastgood+startoffset)/blocksize);
-						// override that with the first not yet written one
-						if (lastbadblock>=tmp_pos) {
-							tmp_pos=lastbadblock+1;
-						}
-						// then write all blocks that are smaller than the current one
-						// note the different calculation that takes into account wether
-						// the current block STARTS in a error but is ok here 
-						// (which wouldnt be the case if we compared tmp_pos directly)
-						while ((tmp_pos*blocksize)<(readposition+startoffset)) {
-							lastbadblock=tmp_pos;
-							sprintf(textbuffer,"%llu\n",lastbadblock);
-							write(bblocksout,textbuffer,strlen(textbuffer));
-							tmp_pos++;
-						}
-					}
 					newerror=retries;
 					remain=0;
 					tmp_pos=readposition/blocksize;
@@ -1166,11 +1363,8 @@ int main(int argc, char ** argv) {
 					output=1;
 					linewidth=0;
 					backtracemode=0;
+					markoutput("end of bad area",readposition,startoffset,blocksize,targetsize,lasterror,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
 					lasterror=readposition;
-					if (marker) {
-						markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
-						lastmarked=readposition;
-					}
 				}
 				
 			} else {
@@ -1208,6 +1402,7 @@ int main(int argc, char ** argv) {
 				}
 				while (writeremain>0) {
 					// write data to destination file
+					debug(DEBUG_SEEK,"debug: seek in destination file: %llu\n",writeposition);
 					cposition=lseek(destination,writeposition,SEEK_SET);
 					if (cposition<0) {
 						fprintf(stderr,"\nError: seek() in %s failed",destfile);
@@ -1220,6 +1415,7 @@ int main(int argc, char ** argv) {
 						arglist_kill(carglist);
 						return 2;
 					}
+					debug(DEBUG_IO,"debug: writing data to destination file: %llu bytes at %llu\n",writeremain,cposition);
 					writeblock=write(destination,databuffer+writeoffset,writeremain);
 					if (writeblock<=0) {
 						fprintf(stderr,"\nError: write to %s failed",destfile);
@@ -1239,6 +1435,7 @@ int main(int argc, char ** argv) {
 			}
 		} else if (block<0) {
 // 6.f.2 failed read
+			debug(DEBUG_IO,"debug: read failed\n");
 			// operation failed
 			counter=1;
 			// use low level IO for error correction if allowed
@@ -1280,7 +1477,6 @@ int main(int argc, char ** argv) {
 						// (next block boundary)
 						remain=(((readposition/blocksize)*blocksize)+faultblocksize)-readposition;
 						lastgood=readposition;
-						lastmarked=readposition;
 					} 
 
 					if (!backtracemode) {
@@ -1288,28 +1484,8 @@ int main(int argc, char ** argv) {
 						write(1,&"X",1);
 						output=1;
 						linewidth++;
-						if (bblocksoutfile!=NULL) {
-							// write badblocks to file if requested
-							// start at first bad block in current bad set
-							tmp_pos=((lastgood+startoffset)/blocksize);
-							// override that with the first not yet written one
-							if (lastbadblock>=tmp_pos) {
-								tmp_pos=lastbadblock+1;
-							}
-							// then write all blocks that are not higher than the current one
-							// note that HERE we compare blocks, not positions since a block
-							// is bad if ANY part of it is bad
-							while (tmp_pos<=((readposition+startoffset)/blocksize)) {
-								lastbadblock=tmp_pos;
-								sprintf(textbuffer,"%llu\n",lastbadblock);
-								write(bblocksout,textbuffer,strlen(textbuffer));
-								tmp_pos++;
-							}
-						}
-						if (marker) {
-							markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
-							lastmarked=readposition;
-						}
+						markoutput("continuous bad area",readposition,startoffset,blocksize,targetsize,(lasterror>lastgood?lasterror:lastgood),&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+						lasterror=readposition;
 					}
 
 					// skip ahead(virtually)
@@ -1319,6 +1495,8 @@ int main(int argc, char ** argv) {
 						// block misalignment caused by partial data reading.
 						// doing so during backtrace would cause an infinite loop.
 						remain=0;
+					} else {
+						debug(DEBUG_FLOW,"debug: bad block during backtrace - remain is %llu at %llu\n",remain,readposition+startoffset);
 					}
 
 				}
@@ -1330,6 +1508,7 @@ int main(int argc, char ** argv) {
 			close (source);
 			// do some forced seeks to move head around.
 			for (cseeks=0;cseeks<seeks;cseeks++) {
+				debug(DEBUG_SEEK,"debug: forced head realignment\n");
 				source=open(sourcefile,O_RDONLY|O_RSYNC );
 				if (source) {
 					lseek(source,0,SEEK_SET);
@@ -1364,22 +1543,10 @@ int main(int argc, char ** argv) {
 
 // 7.closing and finalisation
 
+	debug(DEBUG_FLOW,"debug: main loop ended\n");
 	fflush(stdout);
 	fflush(stderr);
 	if (newerror==0) {
-		// mark badblocks in output
-		if (marker) {
-			if (!incremental || (lastsourceblock+1)*iblocksize>(readposition+startoffset)) {
-				if (lastmarked<filesize && readposition>=filesize) {
-					markbadblocks(destination,lastmarked,filesize-lastmarked,marker,databuffer,blocksize);
-				} else {
-					markbadblocks(destination,lastmarked,readposition-lastmarked,marker,databuffer,blocksize);
-				}
-			} else {
-				tmp_bytes=((lastsourceblock+1)*iblocksize)-startoffset;
-				markbadblocks(destination,lastmarked,tmp_bytes-lastmarked,marker,databuffer,blocksize);
-			}
-		}
 		// if theres an error at the end of input, treat as if we had one succesfull read afterwards
 		tmp_pos=readposition/blocksize;
 		tmp_bytes=readposition-lastgood;
@@ -1387,6 +1554,12 @@ int main(int argc, char ** argv) {
 		sprintf(textbuffer,"}[%llu](+%llu)",tmp_pos,tmp_bytes);
 		write(1,textbuffer,strlen(textbuffer));
 		if (human) write(2,&"\n",1);
+		// mark badblocks in output if not aborted manually
+		if (filesize && lastgood+startoffset<filesize && readposition+startoffset>=filesize) {
+			markoutput("end of file - filling to filesize",filesize,startoffset,blocksize,targetsize,lastgood,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+		} else {
+			markoutput("end of file - filling to last seen position",readposition+startoffset,startoffset,blocksize,targetsize,lastgood,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+		}
 	}
 	if (wantabort) {
 		fprintf(stdout,"\nAborted!\n");
