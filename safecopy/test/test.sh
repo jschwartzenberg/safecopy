@@ -1,13 +1,13 @@
 #!/bin/sh
 
-if ! [ -e ../testsuite ]; then
+if ! [ -e ../test/test.sh ]; then
 	echo "please execute this script within its own directory!";
 	exit 1;
 fi;
 workingdir="$( pwd )";
 cd ..;
 basedir="$( pwd )";
-testdir="$basedir/testsuite";
+testdir="$basedir/test";
 tmpdir="/tmp/safecopytest";
 
 tests="

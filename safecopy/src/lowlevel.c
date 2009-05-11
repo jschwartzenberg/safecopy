@@ -2,6 +2,7 @@
 // make off_t a 64 bit pointer on system that support it
 
 #ifndef __linux__
+#include <sys/types.h>
 // if we don't have linux, the used ioctrls will be different
 // use a dummy read function that uses high lvl operations
 off_t read_desperately(char* filename, int *fd, unsigned char* buffer,
