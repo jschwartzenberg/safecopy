@@ -1,3 +1,7 @@
+/**
+ * This file is copyright ©2009 Corvus Corax
+ * Distributed under the terms of the GPL version 2 or higher
+ */
 /*This file contains the textlist class, to save the list of
   simple char texts, instead of using arrays*/
 

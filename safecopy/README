@@ -444,5 +444,9 @@ Description of output:
 	}[xx](+yy) : current block and number of bytes of recent
 	             continuous unreadable data.
 
-Copyright 2009, distributed under terms of the GPL
+Copyright 2009 CorvusCorax
+This is free software. You may redistribute copies of it under
+the terms of the GNU General Public License version 2 or above.
+        <http://www.gnu.org/licenses/gpl2.html>.
+There is NO WARRANTY, to the extent permitted by law.
 

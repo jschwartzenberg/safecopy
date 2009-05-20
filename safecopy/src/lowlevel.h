@@ -1,3 +1,7 @@
+/**
+ * This file is copyright ©2009 Corvus Corax
+ * Distributed under the terms of the GPL version 2 or higher
+ */
 
 // tries to perform a low level read operation on a device
 // possible results:

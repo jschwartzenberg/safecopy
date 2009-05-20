@@ -1,3 +1,7 @@
+/**
+ * This file is copyright ©2009 Corvus Corax
+ * Distributed under the terms of the GPL version 2 or higher
+ */
 #include <config.h>
 
 #ifdef USE_GNU_SOURCE

@@ -1,3 +1,7 @@
+/**
+ * This file is copyright ©2009 Corvus Corax
+ * Distributed under the terms of the GPL version 2 or higher
+ */
 #define _FILE_OFFSET_BITS 64
 // make off_t a 64 bit pointer on system that support it
 

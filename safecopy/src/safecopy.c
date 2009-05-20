@@ -1,3 +1,7 @@
+/**
+ * This file is copyright ©2009 Corvus Corax
+ * Distributed under the terms of the GPL version 2 or higher
+ */
 //sorry for this file being one big long unreadable mess
 //the main operation loop actually sits in main()
 //basically processing the following sequence
@@ -227,7 +231,12 @@ void usage(char * name) {
 	fprintf(stdout,"	    readable data.\n");
 	fprintf(stdout,"	}[xx](+yy) : current block and number of bytes of recent\n");
 	fprintf(stdout,"	             continuous unreadable data.\n\n");
-	fprintf(stdout,"Copyright 2009, distributed under terms of the GPL\n\n");
+	fprintf(stdout,"Copyright 2009 CorvusCorax\n");
+	fprintf(stdout,"This is free software. You may redistribute copies of it under\n");
+	fprintf(stdout,"the terms of the GNU General Public License version 2 or above.\n");
+	fprintf(stdout,"	<http://www.gnu.org/licenses/gpl2.html>.\n");
+	fprintf(stdout,"There is NO WARRANTY, to the extent permitted by law.\n");
+
 }
 
 // parse an option string
