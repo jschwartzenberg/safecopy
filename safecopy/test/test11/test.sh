@@ -5,7 +5,7 @@ tmpdir="$2";
 safecopy="$basedir/src/safecopy";
 safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
 
-echo -n " - Testing safecopy 8: Incremental recovery with startoffset and size limit: ";
+echo -n " - Testing safecopy 11: Incremental recovery with startoffset, size limit and exclude list: ";
 
 # main emphasis on this test is that no data from exclude blocks are ever read nor written.
 
