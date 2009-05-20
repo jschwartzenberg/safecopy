@@ -53,6 +53,40 @@ recovery of CDs and DVDs on several different drives and computers.
 You can use safecopys incremental recovery feature to read previously
 unreadable sectors only.
 
+
+Reliability:
+
+Data recovery from damaged media is a delicate task, in the worst case its
+success or failure can safe or ruin whole companies and seal affected peoples
+personal fate. It is paramount that any tools written for that purpose are
+reliable and trustworthy.
+
+A user needs to know what exactly the software is doing to his hardware and
+data. The outcome of any operation needs to be both understandable and
+predictable.
+
+An "intelligent data resurrection wizard" with unknown complex internal
+behaviour may be a nifty tool, but does not meet the above requirements of
+predictable outcome, nor will the user know in advance what is done to his
+data.
+
+The operation sequence of safecopy has been kept relatively simple to assure
+this predictability. Unfortunately feature additions have risen the complexity
+and lead to undefined outcome in the past when include and exclude lists had
+been mixed, especially when mixing different block sizes. In the worst case
+this could have lead to overwritten data in the destination file on a later
+incremental run with the mark (-M) option.
+
+From version 1.3 on, safecopy ships with a test suite that can be used to verify
+safecopys behaviour in a set of test cases, simulating the combination of bad
+blocks in input with different include and exclude lists, both with and without
+marking. Releases are only made if safecopy passes those test cases according
+to the specification.
+
+This textual specification of behaviour of safecopy can be found in the file
+specification.txt shipped with safecopy.
+
+
 Different use cases:
 
 	How do I...
@@ -167,6 +201,7 @@ Different use cases:
 	Send me feedback if you had any luck doing so, so I can update
 	this documentation.
 
+
 FAQ:
     Q:	Why create this tool if there already is something like dd-rescue and
 	other tools for that purpose?
@@ -271,6 +306,7 @@ FAQ:
 	!!! If the data is really important, go to a professional data recovery
 	!!! specialist right away, before doing further damage to the drive.
 
+
 Safecopy 1.3 by CorvusCorax
 Usage: safecopy [options] <source> <target>
 Options:
@@ -289,6 +325,7 @@ Options:
 	           Presets: -f 1* -r 1* -R 4 -Z 1 -L 2
 	                    -I stage2.badblocks
 	                    -o stage3.badblocks
+	All stage presets can be overridden by individual options.
 	-b <size> : Blocksize for default read operations.
 	            Set this to the physical sectorsize of your media.
 	            Default: 1*
@@ -329,7 +366,7 @@ Options:
 	                Linux   cdrom         read sector in raw mode
 	                Linux   floppy        controller reset, twaddle
 	            Default: 1
-	--sync : Use synchronized read calls (disable driver buffering)
+	--sync : Use synchronized read calls (disable driver buffering).
 	         Default: Asynchronous read buffering by the OS is allowed
 	-s <blocks> : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
@@ -337,15 +374,21 @@ Options:
 	-l <blocks> : Maximum length of data to be read.
 	              Default: Entire size of input file
 	-I <badblockfile> : Incremental mode. Assume the target file already
-	                    exists and has holes specified in a badblockfile.
+	                    exists and has holes specified in the badblockfile.
 	                    It will be attempted to retrieve more data from
-	                    the missing areas only.
+	                    the listed blocks or from beyond the file size
+	                    of the target file only.
+	                    Warning: Without this option, the destination file
+	                    will be emptied prior to writing.
+	                    Use -I /dev/null if you want to continue a previous
+	                    run of safecopy without a badblock list.
 	                    Default: none
 	-i <bytes> : Blocksize to interpret the badblockfile given with -I.
 	             Default: Blocksize as specified by -b
-	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in
-	                    badblockfile. If used together with -I,
+	-X <badblockfile> : Exclusion mode. If used together with -I,
 	                    excluded blocks override included blocks.
+	                    Safecopy will not read or write any data from
+	                    areas covered by exclude blocks.
 	                    Default: none
 	-x <bytes> : Blocksize to interpret the badblockfile given with -X.
 	             Default: Blocksize as specified by -b
@@ -363,12 +406,16 @@ Options:
 	                  if lseek() fails and we need to skip over data.
 	                  Default: none
 	-M <string> : Mark unrecovered data with this string instead of
-	              skipping / zero-padding it. This helps in later
-	              finding affected files on file system images
-	              that couldn't be rescued completely.
-	              Warning: Using this in combination with
-	              incremental mode (-I) will overwrite data
-	              in the destination file.
+	              skipping it. This helps in later finding corrupted
+	              files on rescued file system images.
+	              The default is to zero unreadable data on creation
+	              of output files, and leaving the data as it is
+	              on any later run.
+	              Warning: When used in combination with
+	              incremental mode (-I) this may overwrite data
+	              in any block that occurs in the -I file.
+	              Blocks not in the -I file, or covered by the file
+	              specified with -X are save from being overwritten.
 	              Default: none
 	-h | --help : Show this text
 

@@ -1,4 +1,4 @@
-.TH SAFECOPY 1 2009-05-05 "" "SAFECOPY"
+.TH SAFECOPY 1 2009-05-13 "" "SAFECOPY"
 
 .SH NAME
 .BR safecopy 
@@ -58,6 +58,37 @@ recovery of CDs and DVDs on several different drives and computers.
 You can use safecopys incremental recovery feature to read previously
 unreadable sectors only.
 
+.SH RELIABILITY
+Data recovery from damaged media is a delicate task, in the worst case its
+success or failure can safe or ruin whole companies and seal affected peoples
+personal fate. It is paramount that any tools written for that purpose are
+reliable and trustworthy.
+.PP
+A user needs to know what exactly the software is doing to his hardware and
+data. The outcome of any operation needs to be both understandable and
+predictable.
+.PP
+An "intelligent data resurrection wizard" with unknown complex internal
+behaviour may be a nifty tool, but does not meet the above requirements of
+predictable outcome, nor will the user know in advance what is done to his
+data.
+.PP
+The operation sequence of safecopy has been kept relatively simple to assure
+this predictability. Unfortunately feature additions have risen the complexity
+and lead to undefined outcome in the past when include and exclude lists had
+been mixed, especially when mixing different block sizes. In the worst case
+this could have lead to overwritten data in the destination file on a later
+incremental run with the mark (\-M) option.
+.PP
+From version 1.3 on, safecopy ships with a test suite that can be used to verify
+safecopys behaviour in a set of test cases, simulating the combination of bad
+blocks in input with different include and exclude lists, both with and without
+marking. Releases are only made if safecopy passes those test cases according
+to the specification.
+.PP
+This textual specification of behaviour of safecopy can be found in the file
+specification.txt shipped with safecopy.
+
 .SH OPTIONS
 .TP
 \fB\-\-stage1\fR
@@ -84,6 +115,8 @@ and low level access.
 \fBPresets\fR: -f 1* -r 1* -R 4 -Z 1 -L 2 \\
 .br
 -I stage2.badblocks -o stage3.badblocks
+.PP
+All stage presets can be overridden by individual options.
 .TP
 \fB\-b\fR <\fIsize\fR>
 Blocksize for default read operations.
@@ -149,7 +182,7 @@ Linux   floppy        controller reset, twaddle
 \fBDefault\fR: 1
 .TP
 \fB\-\-sync\fR
-Use synchronized read calls (disable driver buffering)
+Use synchronized read calls (disable driver buffering).
 .IP
 \fBDefault\fR: Asynchronous read buffering by the OS is allowed
 .TP
@@ -166,8 +199,13 @@ Maximum length of data to be read.
 .TP
 \fB\-I\fR <\fIbadblockfile\fR>
 Incremental mode. Assume the target file already exists and has holes specified
-in a badblockfile.  It will be attempted to retrieve more data from the missing
-areas only.
+in the badblockfile.  It will be attempted to retrieve more data from the
+listed blocks or from beyond the file size of the target file only.
+.IP
+\fBWarning\fR:
+Without this option, the destination file will be emptied prior to writing.
+Use \-I /dev/null if you want to continue a previous run of safecopy without a
+badblock list.
 .IP
 \fBDefault\fR: none
 .TP
@@ -177,8 +215,9 @@ Blocksize to interpret the badblockfile given with \-I.
 \fBDefault\fR: Blocksize as specified by \-b
 .TP
 \fB\-X\fR <\fIbadblockfile\fR>
-Exclusion mode. Do not attempt to read blocks in badblockfile.
-If used together with \-I, excluded blocks override included blocks.
+Exclusion mode. If used together with \-I, excluded blocks override included
+blocks. Safecopy will not read or write any data from areas covered by exclude
+blocks.
 .IP
 \fBDefault\fR: none
 .TP
@@ -204,12 +243,15 @@ used if lseek() fails and we need to skip over data.
 \fBDefault\fR: none
 .TP
 \fB\-M\fR <\fIstring\fR>
-Mark unrecovered data with this string instead of skipping / zero-padding it.
-This helps in later finding affected files on file system images that couldn't
-be rescued completely.
+Mark unrecovered data with this string instead of skipping it. This helps in
+later finding corrupted files on rescued file system images.  The default is to
+zero unreadable data on creation of output files, and leaving the data as it is
+on any later run.
 .IP
-\fBWarning\fR: Using this in combination with incremental mode (-I) will
-overwrite data in the destination file.
+\fBWarning\fR:
+When used in combination with incremental mode (\-I) this may overwrite data in
+any block that occurs in the -I file.  Blocks not in the \-I file, or covered
+by the file specified with \-X are save from being overwritten.
 .IP
 \fBDefault\fR: none
 .TP

@@ -42,3 +42,7 @@
 - Altered behaviour of bad block marker code to keep destination file size equal to source file size, even if the end of the source is unreadable and needs to be skipped.
 - Command line help is now written to stdout instead of stderr
 
+2009.05.13
+- Wrote a test library and test cases to verify safecopys behaviour under controlled conditions.
+- Rewrote parts of safecopies internal logic to assure passing of all test cases.
+- Wrote defined specification of safecopies intended behaviour.

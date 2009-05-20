@@ -111,6 +111,7 @@ void usage(char * name) {
 	fprintf(stdout,"	           Presets: -f 1* -r 1* -R 4 -Z 1 -L 2\n");
 	fprintf(stdout,"	                    -I stage2.badblocks\n");
 	fprintf(stdout,"	                    -o stage3.badblocks\n");
+	fprintf(stdout,"	All stage presets can be overridden by individual options.\n");
 	fprintf(stdout,"	-b <size> : Blocksize for default read operations.\n");
 	fprintf(stdout,"	            Set this to the physical sectorsize of your media.\n");
 	fprintf(stdout,"	            Default: 1*\n");
@@ -151,7 +152,7 @@ void usage(char * name) {
 	fprintf(stdout,"	                Linux   cdrom         read sector in raw mode\n");
 	fprintf(stdout,"	                Linux   floppy        controller reset, twaddle\n");
 	fprintf(stdout,"	            Default: %i\n",DEFLOWLEVEL);
-	fprintf(stdout,"	--sync : Use synchronized read calls (disable driver buffering)\n");
+	fprintf(stdout,"	--sync : Use synchronized read calls (disable driver buffering).\n");
 	fprintf(stdout,"	         Default: Asynchronous read buffering by the OS is allowed\n");
 	fprintf(stdout,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stdout,"	              Will correspond to position 0 in the destination file.\n");
@@ -159,15 +160,21 @@ void usage(char * name) {
 	fprintf(stdout,"	-l <blocks> : Maximum length of data to be read.\n");
 	fprintf(stdout,"	              Default: Entire size of input file\n");
 	fprintf(stdout,"	-I <badblockfile> : Incremental mode. Assume the target file already\n");
-	fprintf(stdout,"	                    exists and has holes specified in a badblockfile.\n");
+	fprintf(stdout,"	                    exists and has holes specified in the badblockfile.\n");
 	fprintf(stdout,"	                    It will be attempted to retrieve more data from\n");
-	fprintf(stdout,"	                    the missing areas only.\n");
+	fprintf(stdout,"	                    the listed blocks or from beyond the file size\n");
+	fprintf(stdout,"	                    of the target file only.\n");
+	fprintf(stdout,"	                    Warning: Without this option, the destination file\n");
+	fprintf(stdout,"	                    will be emptied prior to writing.\n");
+	fprintf(stdout,"	                    Use -I /dev/null if you want to continue a previous\n");
+	fprintf(stdout,"	                    run of safecopy without a badblock list.\n");
 	fprintf(stdout,"	                    Default: none\n");
 	fprintf(stdout,"	-i <bytes> : Blocksize to interpret the badblockfile given with -I.\n");
 	fprintf(stdout,"	             Default: Blocksize as specified by -b\n");
-	fprintf(stdout,"	-X <badblockfile> : Exclusion mode. Do not attempt to read blocks in\n");
-	fprintf(stdout,"	                    badblockfile. If used together with -I,\n");
+	fprintf(stdout,"	-X <badblockfile> : Exclusion mode. If used together with -I,\n");
 	fprintf(stdout,"	                    excluded blocks override included blocks.\n");
+	fprintf(stdout,"	                    Safecopy will not read or write any data from\n");
+	fprintf(stdout,"	                    areas covered by exclude blocks.\n");
 	fprintf(stdout,"	                    Default: none\n");
 	fprintf(stdout,"	-x <bytes> : Blocksize to interpret the badblockfile given with -X.\n");
 	fprintf(stdout,"	             Default: Blocksize as specified by -b\n");
@@ -185,12 +192,16 @@ void usage(char * name) {
 	fprintf(stdout,"	                  if lseek() fails and we need to skip over data.\n");
 	fprintf(stdout,"	                  Default: none\n");
 	fprintf(stdout,"	-M <string> : Mark unrecovered data with this string instead of\n");
-	fprintf(stdout,"	              skipping / zero-padding it. This helps in later\n");
-	fprintf(stdout,"	              finding affected files on file system images\n");
-	fprintf(stdout,"	              that couldn't be rescued completely.\n");
-	fprintf(stdout,"	              Warning: Using this in combination with\n");
-	fprintf(stdout,"	              incremental mode (-I) will overwrite data\n");
-	fprintf(stdout,"	              in the destination file.\n");
+	fprintf(stdout,"	              skipping it. This helps in later finding corrupted\n");
+	fprintf(stdout,"	              files on rescued file system images.\n");
+	fprintf(stdout,"	              The default is to zero unreadable data on creation\n");
+	fprintf(stdout,"	              of output files, and leaving the data as it is\n");
+	fprintf(stdout,"	              on any later run.\n");
+	fprintf(stdout,"	              Warning: When used in combination with\n");
+	fprintf(stdout,"	              incremental mode (-I) this may overwrite data\n");
+	fprintf(stdout,"	              in any block that occurs in the -I file.\n");
+	fprintf(stdout,"	              Blocks not in the -I file, or covered by the file\n");
+	fprintf(stdout,"	              specified with -X are save from being overwritten.\n");
 	fprintf(stdout,"	              Default: none\n");
 	fprintf(stdout,"	-h | --help : Show this text\n\n");
 	fprintf(stdout,"Valid parameters for -f -r -b <size> options are:\n");
@@ -427,8 +438,14 @@ void outputbadblocks(off_t start,off_t limit,int bblocksout,off_t *lastbadblock,
 	}
 }
 
+#define REALMARKOUTPUT_PARAMS startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding 
 // function to mark a given section in both destination file (badblock marking) and badblock output
-void realmarkoutput (off_t start, off_t end, off_t min, off_t max, off_t startoffset, off_t blocksize, off_t *lastbadblock, off_t * lastmarked, char* marker, char* databuffer, char* textbuffer,int bblocksout, char* bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding) {
+void realmarkoutput (
+	// these are relevant
+	off_t start, off_t end, off_t min, off_t max,
+	// the rest is just meta-globals and will be specified by macro above
+	off_t startoffset, off_t blocksize, off_t *lastbadblock, off_t * lastmarked, char* marker, char* databuffer, char* textbuffer,int bblocksout, char* bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding
+) {
 	off_t first=start;
 	off_t last=end;
 	char * tmp;
@@ -477,15 +494,15 @@ void realmarkoutput (off_t start, off_t end, off_t min, off_t max, off_t startof
 						return;
 					}
 					debug(DEBUG_EXCLUDE,"debug: start of current bad block area is covered by xblocks shrinking\n");
-					realmarkoutput(first,last,first-startoffset,last-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+					realmarkoutput(first,last,first-startoffset,last-startoffset,REALMARKOUTPUT_PARAMS);
 					
 					return;
 				} else if(tmp_pos<last) {
 					// 
 // ATTENTION: there could be a reamaining part behind this xblock - needs two recursive calls to self to fix!
 					debug(DEBUG_EXCLUDE,"debug: current bad block area is partially covered by xblocks, splitting\n");
-					realmarkoutput(first,tmp_pos,first-startoffset,tmp_pos-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
-					realmarkoutput(tmp_pos,last,tmp_pos-startoffset,last-startoffset,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+					realmarkoutput(first,tmp_pos,first-startoffset,tmp_pos-startoffset,REALMARKOUTPUT_PARAMS);
+					realmarkoutput(tmp_pos,last,tmp_pos-startoffset,last-startoffset,REALMARKOUTPUT_PARAMS);
 					return;
 				} else {
 					// start of exclude block is beyond end of our area. we are done
@@ -520,8 +537,14 @@ void realmarkoutput (off_t start, off_t end, off_t min, off_t max, off_t startof
 	}
 }
 
+#define MARKOUTPUT_PARAMS startoffset,blocksize,targetsize,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding
 // function to mark output - taking include file information into account to not touch not mentioned blocks
-void markoutput(char* description,off_t readposition, off_t startoffset, off_t blocksize, off_t targetsize, off_t lastgood, off_t * lastbadblock, off_t *lastmarked, char* marker, char* databuffer,char *textbuffer, int incremental, FILE *bblocksin, off_t iblocksize, off_t *lastsourceblock,int bblocksout,char *bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding) {
+void markoutput(
+	// these are relevant
+char* description,off_t readposition, off_t lastgood,
+	// the rest is just meta-globals and will be specified by macro above
+off_t startoffset, off_t blocksize, off_t targetsize, off_t * lastbadblock, off_t *lastmarked, char* marker, char* databuffer,char *textbuffer, int incremental, FILE *bblocksin, off_t iblocksize, off_t *lastsourceblock,int bblocksout,char *bblocksoutfile,int destination, char* xblocksinfile, FILE ** xblocksin,off_t * lastxblock, off_t * previousxblock,off_t xblocksize,int excluding
+) {
 	off_t tmp_pos;
 	char *tmp;
 
@@ -535,7 +558,7 @@ void markoutput(char* description,off_t readposition, off_t startoffset, off_t b
 		while (inc_pos<readposition+startoffset) {
 			if (inc_pos+iblocksize>tmp_pos) {
 				debug(DEBUG_BADBLOCKS,"debug: %s %llu - %llu - marking output for infile block %lli (%llu - %llu)\n",description,tmp_pos,readposition+startoffset,inc_pos/iblocksize,inc_pos,inc_pos+iblocksize);
-				realmarkoutput(inc_pos,inc_pos+iblocksize,lastgood,readposition,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+				realmarkoutput(inc_pos,inc_pos+iblocksize,lastgood,readposition,REALMARKOUTPUT_PARAMS);
 			}
 			if(inc_pos+iblocksize>readposition+startoffset) {
 				// do not read in another include block
@@ -560,7 +583,7 @@ void markoutput(char* description,off_t readposition, off_t startoffset, off_t b
 		}
 	} else {
 		debug(DEBUG_BADBLOCKS,"debug: %s %llu - %llu - marking output for whole bad area\n",description,tmp_pos,readposition+startoffset);
-		realmarkoutput(tmp_pos,readposition+startoffset,lastgood,readposition,startoffset,blocksize,lastbadblock,lastmarked,marker,databuffer,textbuffer,bblocksout,bblocksoutfile,destination,xblocksinfile,xblocksin,lastxblock,previousxblock,xblocksize,excluding);
+		realmarkoutput(tmp_pos,readposition+startoffset,lastgood,readposition,REALMARKOUTPUT_PARAMS);
 	}
 
 }
@@ -851,6 +874,7 @@ int main(int argc, char ** argv) {
 
 	if (arglist_arggiven(carglist,"-M")==0) {
 		failuredefstring=arglist_parameter(carglist,"-M",0);
+		if (failuredefstring==NULL) failuredefstring="";
 	}
 	if (failuredefstring!=NULL) {
 		marker=failuredefstring;
@@ -1363,7 +1387,7 @@ int main(int argc, char ** argv) {
 					output=1;
 					linewidth=0;
 					backtracemode=0;
-					markoutput("end of bad area",readposition,startoffset,blocksize,targetsize,lasterror,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+					markoutput("end of bad area",readposition,lasterror,MARKOUTPUT_PARAMS);
 					lasterror=readposition;
 				}
 				
@@ -1484,7 +1508,7 @@ int main(int argc, char ** argv) {
 						write(1,&"X",1);
 						output=1;
 						linewidth++;
-						markoutput("continuous bad area",readposition,startoffset,blocksize,targetsize,(lasterror>lastgood?lasterror:lastgood),&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+						markoutput("continuous bad area",readposition,(lasterror>lastgood?lasterror:lastgood),MARKOUTPUT_PARAMS);
 						lasterror=readposition;
 					}
 
@@ -1556,9 +1580,9 @@ int main(int argc, char ** argv) {
 		if (human) write(2,&"\n",1);
 		// mark badblocks in output if not aborted manually
 		if (filesize && lastgood+startoffset<filesize && readposition+startoffset>=filesize) {
-			markoutput("end of file - filling to filesize",filesize,startoffset,blocksize,targetsize,lastgood,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+			markoutput("end of file - filling to filesize",filesize,lastgood,MARKOUTPUT_PARAMS);
 		} else {
-			markoutput("end of file - filling to last seen position",readposition+startoffset,startoffset,blocksize,targetsize,lastgood,&lastbadblock,&lastmarked,marker,databuffer,textbuffer,incremental,bblocksin,iblocksize,&lastsourceblock,bblocksout,bblocksoutfile,destination,xblocksinfile,&xblocksin,&lastxblock,&previousxblock,xblocksize,excluding);
+			markoutput("end of file - filling to last seen position",readposition+startoffset,lastgood,MARKOUTPUT_PARAMS);
 		}
 	}
 	if (wantabort) {
