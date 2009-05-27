@@ -17,7 +17,7 @@
 // 6.d input - attempt to read from sourcefile
 // 6.e feedback - calculate and display user feedback information
 // 6.f reaction - act according to result of read operation
-// 6.f.1 succesfull read:
+// 6.f.1 successful read:
 // 6.f.1.a attempt to backtrack for readable data prior to current position or...
 // 6.f.1.b write to output data file
 // 6.f.2 failed read
@@ -1019,7 +1019,7 @@ int main(int argc, char ** argv) {
 		//we are currently dealing with an unrecoverable error and need to find the end of the bad area
 	newsofterror=0; //flag that indicates previous read failures on the current block
 	lasterror=0; //address of the last encountered bad area in source file
-	lastgood=0; //address of the last encountered succesfull read in source file
+	lastgood=0; //address of the last encountered successful read in source file
 	lastmarked=0; //last known address already marked in output file
 	lastbadblock=-1; //most recently encountered block for output badblock file
 	lastxblock=-1; //most recently encountered block number from input exclude file
@@ -1360,17 +1360,17 @@ int main(int argc, char ** argv) {
 		output=0;
 
 // 6.f processing - react according to result of read operation
-// 6.f.1 succesfull read:
+// 6.f.1 successful read:
 		if (block>0) {
-			debug(DEBUG_IO,"debug: succesfull read\n");
+			debug(DEBUG_IO,"debug: successful read\n");
 			sposition=sposition+block;
-			// successfull read, if happening during soft recovery
+			// successful read, if happening during soft recovery
 			// (downscale or retry) list a single soft error
 			if (newsofterror==1) {
 				newsofterror=0;
 				softerr++;
 			}
-			// read successfull, test for end of damaged area
+			// read successful, test for end of damaged area
 			if (newerror==0) {
 // 6.f.1.a attempt to backtrack for readable data prior to current position or...
 				// we are in recovery since we just read past the end of a damaged area
@@ -1580,7 +1580,7 @@ int main(int argc, char ** argv) {
 	fflush(stdout);
 	fflush(stderr);
 	if (newerror==0) {
-		// if theres an error at the end of input, treat as if we had one succesfull read afterwards
+		// if theres an error at the end of input, treat as if we had one successful read afterwards
 		tmp_pos=readposition/blocksize;
 		tmp_bytes=readposition-lastgood;
 		damagesize+=tmp_bytes;

@@ -3,7 +3,7 @@ basedir="$1";
 tmpdir="$2";
 
 safecopy="$basedir/src/safecopy";
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
+safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD";
 
 echo -n " - Testing safecopy 6: Incremental recovery: ";
 
@@ -19,7 +19,7 @@ cp test1.dat "$tmpdir/test5.dat" >/dev/null 2>&1
 # first incremental run with big skipsize. must not overwrite or mark previously sucesfully recovered data in blocks 6 and 7, while correctly reading the data past the end of the last badblock thanks to low resolution
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 8* -o "$tmpdir/test2.badblocks" debug "$tmpdir/test2.dat" -I "$tmpdir/test1.badblocks" >/dev/null 2>&1;
 
-# second incremental run with narrow skipsize. must succesfully read the "in between" good block the first run missed, too
+# second incremental run with narrow skipsize. must successfully read the "in between" good block the first run missed, too
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 1* -o "$tmpdir/test3.badblocks" debug "$tmpdir/test3.dat" -I "$tmpdir/test1.badblocks" >/dev/null 2>&1;
 
 # same again but with badblock marking. must mark all blocks that remain zero in the previous output files but not more

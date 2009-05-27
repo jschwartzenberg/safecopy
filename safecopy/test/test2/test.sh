@@ -4,11 +4,11 @@ basedir="$1";
 tmpdir="$2";
 
 safecopy="$basedir/src/safecopy";
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
+safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD";
 
 echo -n " - Testing safecopy 2: Soft recovery: ";
 
-# safecopy - must succesfully read despite the first two read attempts of block 2 will fail
+# safecopy - must successfully read despite the first two read attempts of block 2 will fail
 LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test1.badblocks" debug "$tmpdir/test1.dat" >/dev/null 2>&1;
 
 # safecopy - must create correct output and badblock file when retry limit is too low

@@ -4,11 +4,11 @@ basedir="$1";
 tmpdir="$2";
 
 safecopy="$basedir/src/safecopy";
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
+safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD";
 
 echo -n " - Testing safecopy 3: Soft recovery + hard errors: ";
 
-# safecopy must succesfully recover from the soft error but write the hard error to the badblock list correctly
+# safecopy must successfully recover from the soft error but write the hard error to the badblock list correctly
 LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test1.badblocks" debug "$tmpdir/test1.dat" >/dev/null 2>&1;
 
 # safecopy cannot recover doe to low retry factor and must write all sectors to the badblock list. it will also not recover the blocks 7 8 and 9 due to big skipsize

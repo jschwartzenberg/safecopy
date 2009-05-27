@@ -4,7 +4,7 @@ basedir="$1";
 tmpdir="$2";
 
 safecopy="$basedir/src/safecopy";
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
+safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD";
 
 echo -n " - Testing safecopy 5: Completely unreadable file: ";
 

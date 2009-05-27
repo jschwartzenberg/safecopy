@@ -207,7 +207,7 @@ FAQ:
 	other tools for that purpose?
     A:  Because I didn't know of dd(-)rescue when I started, and I felt like
 	it. Also I think safecopy suits the needs of a user in data loss peril
-	better doe to more readable output and more understandable options than
+	better due to more readable output and more understandable options than
 	some of the other tools. (Then again I am biased. Compare them
 	yourself.) Meanwhile safecopy supports low level features other tools
 	don't.

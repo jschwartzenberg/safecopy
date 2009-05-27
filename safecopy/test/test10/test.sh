@@ -3,7 +3,7 @@ basedir="$1";
 tmpdir="$2";
 
 safecopy="$basedir/src/safecopy";
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0";
+safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD";
 
 echo -n " - Testing safecopy 10: Incremental recovery with blocksize variation and exclude blocks ";
 
@@ -22,10 +22,10 @@ cp test2.dat "$tmpdir/test6.dat" >/dev/null 2>&1
 # first incremental run with big skipsize. Must recover the missing data at the end of the affected areas. Must transpose the badblock list to new sector sizes
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 8* -o "$tmpdir/test3.badblocks" debug "$tmpdir/test3.dat" -i 1150 -I "$tmpdir/test1.badblocks" -x 490 -X xblocks >/dev/null 2>&1;
 
-# second incremental run with narrow skipsize. must succesfully read ALL the "in between" data too
+# second incremental run with narrow skipsize. must successfully read ALL the "in between" data too
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 1* -r 1 -o "$tmpdir/test4.badblocks" debug "$tmpdir/test4.dat" -i 1150 -I "$tmpdir/test1.badblocks" -x 490 -X xblocks >/dev/null 2>&1;
 
-# same again but with badblock marking. this one may overwrite succesfully rescued data as long as it affects only blocks marked as bad in the include file
+# same again but with badblock marking. this one may overwrite successfully rescued data as long as it affects only blocks marked as bad in the include file
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 8* -o "$tmpdir/test5.badblocks" debug "$tmpdir/test5.dat" -i 1150 -I "$tmpdir/test1.badblocks" -x 490 -X xblocks -M "MARKBAAD" >/dev/null 2>&1;
 # this one must only differ from test4.dat in internal shifts of marker strings, not in data
 LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 1* -r 1 -o "$tmpdir/test6.badblocks" debug "$tmpdir/test6.dat" -i 1150 -I "$tmpdir/test1.badblocks" -x 490 -X xblocks -M "MARKBAAD" >/dev/null 2>&1;

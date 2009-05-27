@@ -51,12 +51,13 @@ for instance in $tests; do
 	fi;
 	echo "running $instance:";
 	if ./test.sh "$basedir" "$tmpdir"; then
-		echo " - - successfull";
+		echo " - - successful";
 	else
 		echo " - - failed - aborting";
 		end 1;
 	fi;
 done;
 
+end 0;
 
 

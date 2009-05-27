@@ -44,7 +44,7 @@ int is_floppy(int fd) {
 	static int isfloppy=-1;
 	if (isfloppy!=-1) return isfloppy;
 
-	// attempt a drive reset, return true if succesfull
+	// attempt a drive reset, return true if successful
 	if (ioctl(fd,FDRESET,FD_RESET_ALWAYS)>=0) {
 		fprintf(stderr,"\nFloppy low level access: drive reset, twaddle ioctl\n");
 		isfloppy=1;

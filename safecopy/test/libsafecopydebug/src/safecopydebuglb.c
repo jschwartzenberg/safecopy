@@ -2,6 +2,7 @@
  * This file is copyright ©2009 Corvus Corax
  * Distributed under the terms of the GPL version 2 or higher
  */
+#define _FILE_OFFSET_BITS 64
 #include <config.h>
 
 #ifdef USE_GNU_SOURCE
@@ -35,10 +36,12 @@ static int mydesc=-1;
 static off_t current=0;
 
 void _init(void);
+int open(const char*,int,...);
 int open64(const char*,int,...);
+off_t lseek(int,off_t,int);
 off64_t lseek64(int,off64_t,int);
 ssize_t read(int,void*,size_t);
-int close64(int);
+int close(int);
 
 ssize_t write(int, const void *, size_t);
 
@@ -157,6 +160,17 @@ void _init(void) {
 	readoptions();
 }
 
+int open(const char *pathname, int flags, ...) {
+	int mode=0;
+	if (flags & O_CREAT) {
+		va_list ap;
+		va_start (ap,flags);
+		mode=va_arg(ap,int);
+		va_end(ap);
+	}
+	return open64(pathname,flags,mode);
+}
+
 int open64(const char *pathname,int flags,...) {
 	//va_list ap;
 	int fd;
@@ -192,6 +206,10 @@ int close(int fd) {
 		mydesc=-1;
 	}
 	return realclose(fd);
+}
+
+off_t lseek(int filedes, off_t offset, int whence) {
+	return lseek64(filedes,offset,whence);
 }
 
 off64_t lseek64(int filedes, off64_t offset, int whence) {
