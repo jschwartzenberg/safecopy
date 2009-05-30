@@ -43,6 +43,10 @@ off64_t lseek64(int,off64_t,int);
 ssize_t read(int,void*,size_t);
 int close(int);
 
+// these are needed on some newer glibc:
+int __open_2(const char*,int);
+int __open64_2(const char*,int);
+
 ssize_t write(int, const void *, size_t);
 
 
@@ -171,6 +175,10 @@ int open(const char *pathname, int flags, ...) {
 	return open64(pathname,flags,mode);
 }
 
+int __open_2(const char *pathname, int flags) {
+	return open64(pathname,flags);
+}
+
 int open64(const char *pathname,int flags,...) {
 	//va_list ap;
 	int fd;
@@ -199,6 +207,9 @@ int open64(const char *pathname,int flags,...) {
 	return fd;
 }
 
+int __open64_2(const char *pathname, int flags) {
+	return open64(pathname,flags);
+}
 
 int close(int fd) {
 	if (fd==mydesc && mydesc!=-1) {
