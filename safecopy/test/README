@@ -1,4 +1,7 @@
 safecopy test suite
+libtestsuite.sh: test suite script library
+config_in.sh: config file for test suite
+test.sh: run all tests
 libsafecopydebug: wrapper library that hooks on libc functions (open, read, seek) to simulate fake IO errors
 
 test0: test wether test libc wrapper library works

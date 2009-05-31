@@ -1,19 +1,19 @@
 #!/bin/sh
 
-basedir="$1"
-tmpdir="$2"
+test_name="safecopy, ability to simply copy a regular file"
 
-safecopy="$basedir/src/safecopy"
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD"
+source "../libtestsuite.sh"
 
-echo -n " - Testing safecopy 1: Simple plain file copy: "
+function test_current() {
+	testsuite_debug "Test if a copy of a file created with safecopy is identical to the source."
+	if ! $safecopy "test.dat" "$testsuite_tmpdir/test.dat" >"$testsuite_tmpdir/test.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+		testsuite_debug_file "$testsuite_tmpdir/test.out"
+	fi
+	testsuite_assert_files_identical "test.dat" "$testsuite_tmpdir/test.dat"
 
-# test without the deug library. safecopy must duplicate the file
-# without errors
-$safecopy test.dat "$tmpdir/test.dat" >/dev/null 2>&1
-if diff --brief test.dat "$tmpdir/test.dat" >/dev/null 2>&1; then
-	echo "OK"
-	exit 0
-fi
-echo "FAIL"
-exit 1
+}
+
+testsuite_runtest
+
+

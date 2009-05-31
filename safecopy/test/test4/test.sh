@@ -1,35 +1,43 @@
 #!/bin/sh
 
-basedir="$1"
-tmpdir="$2"
+test_name="safecopy, copying from file with unreadable end"
 
-safecopy="$basedir/src/safecopy"
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD"
+source "../libtestsuite.sh"
 
-echo -n " - Testing safecopy 4: Unreadable end of file: "
+function test_current() {
 
-# safecopy writes a shortened output file since the last blocks are unreadable. The badblocks output must state these short read blocks
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test1.badblocks" debug "$tmpdir/test1.dat" >/dev/null 2>&1
+	testsuite_debug "Test, output file is cut short but badblocks output must state the missing blocks."
+	if ! LD_PRELOAD="$preload" $safecopy -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test1.badblocks" debug "$testsuite_tmpdir/test1.dat" >"$testsuite_tmpdir/test1.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test1.out"
+	fi
+	testsuite_assert_files_identical "test1.dat" "$testsuite_tmpdir/test1.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test1.badblocks"
 
-# same as above but safecopy must recover the soft error
-LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test2.badblocks" debug "$tmpdir/test2.dat" >/dev/null 2>&1
+	testsuite_debug "Test, same test again, now with a recovered soft error."
+	if ! LD_PRELOAD="$preload" $safecopy -R 3 -b 1024 -f 4* -o "$testsuite_tmpdir/test2.badblocks" debug "$testsuite_tmpdir/test2.dat" >"$testsuite_tmpdir/test2.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test2.out"
+	fi
+	testsuite_assert_files_identical "test2.dat" "$testsuite_tmpdir/test2.dat"
+	testsuite_assert_files_identical "test2.badblocks" "$testsuite_tmpdir/test2.badblocks"
 
-# same as above but with output marking. the output file needs to have the correct size with all bad data marked correctly
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test3.badblocks" debug "$tmpdir/test3.dat" -M "MARKBAAD" >/dev/null 2>&1
+	testsuite_debug "Test, with marking, output file has correct length."
+	if ! LD_PRELOAD="$preload" $safecopy -M "MARKBAAD" -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test3.badblocks" debug "$testsuite_tmpdir/test3.dat" >"$testsuite_tmpdir/test3.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test3.out"
+	fi
+	testsuite_assert_files_identical "test3.dat" "$testsuite_tmpdir/test3.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test3.badblocks"
 
-# same but with the softerror corrected
-LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test4.badblocks" debug "$tmpdir/test4.dat" -M "MARKBAAD" >/dev/null 2>&1
+	testsuite_debug "Test, same test again, now with a recovered soft error."
+	if ! LD_PRELOAD="$preload" $safecopy -M "MARKBAAD" -R 3 -b 1024 -f 4* -o "$testsuite_tmpdir/test4.badblocks" debug "$testsuite_tmpdir/test4.dat" >"$testsuite_tmpdir/test4.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test4.out"
+	fi
+	testsuite_assert_files_identical "test4.dat" "$testsuite_tmpdir/test4.dat"
+	testsuite_assert_files_identical "test2.badblocks" "$testsuite_tmpdir/test4.badblocks"
+}
 
-if diff --brief test1.dat "$tmpdir/test1.dat" >/dev/null 2>&1 &&
-   diff --brief test2.dat "$tmpdir/test2.dat" >/dev/null 2>&1 &&
-   diff --brief test3.dat "$tmpdir/test3.dat" >/dev/null 2>&1 &&
-   diff --brief test4.dat "$tmpdir/test4.dat" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test1.badblocks" >/dev/null 2>&1 &&
-   diff --brief test2.badblocks "$tmpdir/test2.badblocks" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test3.badblocks" >/dev/null 2>&1 &&
-   diff --brief test2.badblocks "$tmpdir/test4.badblocks" >/dev/null 2>&1; then
-		echo "OK"
-		exit 0
-fi
-echo "FAIL"
-exit 1
+testsuite_runtest
+

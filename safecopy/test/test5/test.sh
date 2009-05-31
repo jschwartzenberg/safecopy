@@ -1,25 +1,28 @@
 #!/bin/sh
 
-basedir="$1"
-tmpdir="$2"
+test_name="safecopy, copying from completely unreadable file"
 
-safecopy="$basedir/src/safecopy"
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD"
+source "../libtestsuite.sh"
 
-echo -n " - Testing safecopy 5: Completely unreadable file: "
+function test_current() {
 
-# safecopy: unreadable file without marking. result must be an empty file and a complete block list
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test1.badblocks" debug "$tmpdir/test1.dat" >/dev/null 2>&1
+	testsuite_debug "Test, no marking, output file is 0 bytes, badblock list complete"
+	if ! LD_PRELOAD="$preload" $safecopy -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test1.badblocks" debug "$testsuite_tmpdir/test1.dat" >"$testsuite_tmpdir/test1.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test1.out"
+	fi
+	testsuite_assert_files_identical "test1.dat" "$testsuite_tmpdir/test1.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test1.badblocks"
 
-# safecopy: unreadable file with marking. result must be a file of exact source size filled completely with marker data
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test2.badblocks" debug "$tmpdir/test2.dat" -M "MARKBAAD" >/dev/null 2>&1
+	testsuite_debug "Test, marking, output file is correct size all marked, badblock list complete"
+	if ! LD_PRELOAD="$preload" $safecopy -M "MARKBAAD" -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test2.badblocks" debug "$testsuite_tmpdir/test2.dat" >"$testsuite_tmpdir/test2.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test2.out"
+	fi
+	testsuite_assert_files_identical "test2.dat" "$testsuite_tmpdir/test2.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test2.badblocks"
 
-if diff --brief test1.dat "$tmpdir/test1.dat" >/dev/null 2>&1 &&
-   diff --brief test2.dat "$tmpdir/test2.dat" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test1.badblocks" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test2.badblocks" >/dev/null 2>&1; then
-		echo "OK"
-		exit 0
-fi
-echo "FAIL"
-exit 1
+}
+
+testsuite_runtest
+

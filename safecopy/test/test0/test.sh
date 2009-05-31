@@ -1,23 +1,22 @@
 #!/bin/sh
 
-basedir="$1"
-tmpdir="$2"
+test_name="debug library functionality"
 
-safecopy="$basedir/src/safecopy"
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD"
+source "../libtestsuite.sh"
 
-echo -n " - Testing test debug library functionality: "
+function test_current() {
 
-# test if the test libray gets loaded and works. the destination file must be cropped at 2048 byte
-# since cat - unlike safecopy - can not read beyond IO errors.
-LD_PRELOAD="$safecopydebug" cat debug >"$tmpdir/test.dat" 2>/dev/null
-
-if [ -e "$tmpdir/test.dat" ]; then
-	size=$( du -b "$tmpdir/test.dat" | cut -f 1 )
-	if [ $size -eq 2048 ]; then
-		echo "OK"
-		exit 0
+	testsuite_debug "Test if the test library gets loaded and works."
+	testsuite_debug " Runnign cat on the virtual debug file should result in a 2048 byte file"
+	testsuite_debug " since that is the address of the first simulated IO error."
+	LD_PRELOAD="$preload" cat debug >"$testsuite_tmpdir/test.dat" 2>"$testsuite_tmpdir/test.out"
+	if ! testsuite_assert_filesize "$testsuite_tmpdir/test.dat" 2048; then
+		testsuite_debug "program reported:"
+		testsuite_debug_file "$testsuite_tmpdir/test.out"
 	fi
-fi
-echo "FAIL"
-exit 1
+
+}
+
+testsuite_runtest
+
+

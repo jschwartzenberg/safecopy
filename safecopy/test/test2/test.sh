@@ -1,33 +1,45 @@
 #!/bin/sh
 
-basedir="$1"
-tmpdir="$2"
+test_name="safecopy, restoring data with non-persistant IO errors"
 
-safecopy="$basedir/src/safecopy"
-safecopydebug="../libsafecopydebug/src/libsafecopydebuglb.so.1.0: $LD_PRELOAD"
+source "../libtestsuite.sh"
 
-echo -n " - Testing safecopy 2: Soft recovery: "
+function test_current() {
 
-# safecopy - must successfully read despite the first two read attempts of block 2 will fail
-LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test1.badblocks" debug "$tmpdir/test1.dat" >/dev/null 2>&1
+	testsuite_debug "Test if the data gets copied successfully despite of recoverable read errors."
+	if ! LD_PRELOAD="$preload" $safecopy -R 3 -b 1024 -f 4* -o "$testsuite_tmpdir/test1.badblocks" debug "$testsuite_tmpdir/test1.dat" >"$testsuite_tmpdir/test1.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test1.out"
+	fi
+	testsuite_assert_files_identical "test.dat" "$testsuite_tmpdir/test1.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test1.badblocks"
 
-# safecopy - must create correct output and badblock file when retry limit is too low
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test2.badblocks" debug "$tmpdir/test2.dat" >/dev/null 2>&1
+	testsuite_debug "Test if the data gets partially copied with unrecoverable read errors."
+	if ! LD_PRELOAD="$preload" $safecopy -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test2.badblocks" debug "$testsuite_tmpdir/test2.dat" >"$testsuite_tmpdir/test2.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test2.out"
+	fi
+	testsuite_assert_files_identical "test2.dat" "$testsuite_tmpdir/test2.dat"
+	testsuite_assert_files_identical "test2.badblocks" "$testsuite_tmpdir/test2.badblocks"
 
-# same as above with badblock marking in destination
-LD_PRELOAD="$safecopydebug" $safecopy -R 3 -b 1024 -f 4* -o "$tmpdir/test3.badblocks" debug "$tmpdir/test3.dat" >/dev/null 2>&1 -M "MARKBAAD"
-LD_PRELOAD="$safecopydebug" $safecopy -R 2 -b 1024 -f 4* -o "$tmpdir/test4.badblocks" debug "$tmpdir/test4.dat" >/dev/null 2>&1 -M "MARKBAAD"
+	testsuite_debug "Test if the data gets copied successfully despite of recoverable read errors (with marking option)."
+	if ! LD_PRELOAD="$preload" $safecopy -M "MARKBAAD" -R 3 -b 1024 -f 4* -o "$testsuite_tmpdir/test3.badblocks" debug "$testsuite_tmpdir/test3.dat" >"$testsuite_tmpdir/test3.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test3.out"
+	fi
+	testsuite_assert_files_identical "test.dat" "$testsuite_tmpdir/test3.dat"
+	testsuite_assert_files_identical "test1.badblocks" "$testsuite_tmpdir/test3.badblocks"
 
-if diff --brief test.dat "$tmpdir/test1.dat" >/dev/null 2>&1 &&
-   diff --brief test2.dat "$tmpdir/test2.dat" >/dev/null 2>&1 &&
-   diff --brief test.dat "$tmpdir/test3.dat" >/dev/null 2>&1 &&
-   diff --brief test4.dat "$tmpdir/test4.dat" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test1.badblocks" >/dev/null 2>&1 &&
-   diff --brief test2.badblocks "$tmpdir/test2.badblocks" >/dev/null 2>&1 &&
-   diff --brief test1.badblocks "$tmpdir/test3.badblocks" >/dev/null 2>&1 &&
-   diff --brief test2.badblocks "$tmpdir/test4.badblocks" >/dev/null 2>&1; then
-		echo "OK"
-		exit 0
-fi
-echo "FAIL"
-exit 1
+	testsuite_debug "Test if the data gets partially copied with unrecoverable read errors and the rest marked as bad."
+	if ! LD_PRELOAD="$preload" $safecopy -M "MARKBAAD" -R 2 -b 1024 -f 4* -o "$testsuite_tmpdir/test4.badblocks" debug "$testsuite_tmpdir/test4.dat" >"$testsuite_tmpdir/test4.out" 2>&1; then
+		testsuite_error "Run of safecopy failed. Output:"
+                testsuite_debug_file "$testsuite_tmpdir/test4.out"
+	fi
+	testsuite_assert_files_identical "test4.dat" "$testsuite_tmpdir/test4.dat"
+	testsuite_assert_files_identical "test2.badblocks" "$testsuite_tmpdir/test4.badblocks"
+
+}
+
+testsuite_runtest
+
+
