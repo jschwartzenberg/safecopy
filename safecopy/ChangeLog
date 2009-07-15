@@ -46,3 +46,7 @@
 - Wrote a test library and test cases to verify safecopys behaviour under controlled conditions.
 - Rewrote parts of safecopies internal logic to assure passing of all test cases.
 - Wrote defined specification of safecopies intended behaviour.
+
+2009.07.15
+- Test suite scripts have been rewritten to be more portable.
+- Some fixes in documentation.

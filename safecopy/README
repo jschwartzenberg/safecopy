@@ -307,8 +307,8 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive.
 
 
-Safecopy 1.3 by CorvusCorax
-Usage: safecopy [options] <source> <target>
+Safecopy 1.4 by CorvusCorax
+Usage: ./safecopy [options] <source> <target>
 Options:
 	--stage1 : Preset to rescue most of the data fast,
 	           using no retries and avoiding bad areas.
@@ -447,6 +447,5 @@ Description of output:
 Copyright 2009 CorvusCorax
 This is free software. You may redistribute copies of it under
 the terms of the GNU General Public License version 2 or above.
-        <http://www.gnu.org/licenses/gpl2.html>.
+	<http://www.gnu.org/licenses/gpl2.html>.
 There is NO WARRANTY, to the extent permitted by law.
-
