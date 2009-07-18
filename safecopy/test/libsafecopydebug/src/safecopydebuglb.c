@@ -72,7 +72,7 @@ static inline void delay(int milliseconds) {
 	static struct timespec x;
 	if (milliseconds==0) return;
 	x.tv_sec=milliseconds/1000;
-	x.tv_nsec=(milliseconds%1000)*1000;
+	x.tv_nsec=(milliseconds%1000)*1000000;
 	nanosleep(&x,NULL);
 }
 
