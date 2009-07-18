@@ -10,6 +10,7 @@
 #endif
 
 #define CONFIGFILE "safecopydebug.cfg"
+#define MAXSLOWSECTORS 65536
 #define MAXSOFTERRORS 65536
 #define MAXHARDERRORS 65536
 
@@ -18,6 +19,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
 //#include <unistd.h>
 #include <string.h>
 //#include <fcntl.h>
@@ -50,15 +52,29 @@ int __open64_2(const char*,int);
 ssize_t write(int, const void *, size_t);
 
 
+static int slowsector[MAXSOFTERRORS]={0};
 static int softerror[MAXSOFTERRORS]={0};
 static int softerrorcount[MAXSOFTERRORS]={0};
 static int harderror[MAXHARDERRORS]={0};
+static int slowsectordelay=0;
+static int softerrordelay=0;
+static int harderrordelay=0;
+static int slowsectors=0;
 static int softerrors=0;
 static int harderrors=0;
 static int blocksize=1024;
 static int softfailcount=0;
 static int filesize=10240;
 static char filename[256]="/dev/urandom";
+
+
+static inline void delay(int milliseconds) {
+	static struct timespec x;
+	if (milliseconds==0) return;
+	x.tv_sec=milliseconds/1000;
+	x.tv_nsec=(milliseconds%1000)*1000;
+	nanosleep(&x,NULL);
+}
 
 void readoptions() {
 	FILE *fd;
@@ -90,6 +106,19 @@ void readoptions() {
 			} else if (strcmp(line,"softfailcount")==0) {
 				sscanf(number,"%u",&softfailcount);
 				fprintf(stderr,"debugfile simulated soft error count: %u\n",softfailcount);
+			} else if (strcmp(line,"delayslow")==0) {
+				sscanf(number,"%u",&slowsectordelay);
+				fprintf(stderr,"debugfile delay on \"slow\" sectors: %u ms\n",slowsectordelay);
+			} else if (strcmp(line,"delaysoft")==0) {
+				sscanf(number,"%u",&softerrordelay);
+				fprintf(stderr,"debugfile delay on soft errors: %u ms\n",softerrordelay);
+			} else if (strcmp(line,"delayhard")==0) {
+				sscanf(number,"%u",&harderrordelay);
+				fprintf(stderr,"debugfile delay on hard errors: %u ms\n",harderrordelay);
+			} else if (strcmp(line,"slow")==0) {
+				sscanf(number,"%u",&slowsector[slowsectors]);
+				fprintf(stderr,"debugfile simulating read difficulty in block: %u\n",slowsector[slowsectors]);
+				slowsectors++;
 			} else if (strcmp(line,"softfail")==0) {
 				sscanf(number,"%u",&softerror[softerrors]);
 				fprintf(stderr,"debugfile simulating soft error in block: %u\n",softerror[softerrors]);
@@ -274,8 +303,14 @@ ssize_t read(int fd,void *buf,size_t count) {
 		}
 		block1=current/blocksize;
 		block2=(current+result)/blocksize;
+		for (count2=0;count2<slowsectors;count2++) {
+			if (slowsector[count2]==block1) {
+				delay(slowsectordelay);
+			}
+		}
 		for (count2=0;count2<softerrors;count2++) {
 			if (softerror[count2]==block1) {
+				delay(softerrordelay);
 				if (softerrorcount[count2]++<softfailcount) {
 					myprint(" simulated soft failure!\n");
 					errno=EIO;
@@ -293,6 +328,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 		}
 		for (count2=0;count2<harderrors;count2++) {
 			if (harderror[count2]==block1) {
+				delay(harderrordelay);
 				myprint(" simulated hard failure!\n");
 				errno=EIO;
 				return -1;

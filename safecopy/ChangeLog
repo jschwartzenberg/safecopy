@@ -50,3 +50,8 @@
 2009.07.15
 - Test suite scripts have been rewritten to be more portable.
 - Some fixes in documentation.
+
+2009.07.18
+- Support for synchronous direct IO via O_DIRECT added.
+- Improved the test debug library to simulate delays and timeouts.
+

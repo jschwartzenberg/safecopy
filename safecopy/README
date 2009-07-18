@@ -307,8 +307,8 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive.
 
 
-Safecopy 1.4 by CorvusCorax
-Usage: ./safecopy [options] <source> <target>
+Safecopy 1.5 by CorvusCorax
+Usage: safecopy [options] <source> <target>
 Options:
 	--stage1 : Preset to rescue most of the data fast,
 	           using no retries and avoiding bad areas.
@@ -367,6 +367,8 @@ Options:
 	                Linux   floppy        controller reset, twaddle
 	            Default: 1
 	--sync : Use synchronized read calls (disable driver buffering).
+	         Safecopy will use O_DIRECT if supported by the OS
+	         and O_SYNC otherwise.
 	         Default: Asynchronous read buffering by the OS is allowed
 	-s <blocks> : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.

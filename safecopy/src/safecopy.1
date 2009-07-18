@@ -183,6 +183,7 @@ Linux   floppy        controller reset, twaddle
 .TP
 \fB\-\-sync\fR
 Use synchronized read calls (disable driver buffering).
+Safecopy will use O_DIRECT if supported by the OS and O_SYNC otherwise.
 .IP
 \fBDefault\fR: Asynchronous read buffering by the OS is allowed
 .TP

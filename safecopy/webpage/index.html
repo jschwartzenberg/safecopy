@@ -16,6 +16,13 @@ safecopy is a data recovery tool which tries to extract as much data as possible
 </h2>
 <h3>News:</h3>
 <p>
+2009-07-18:
+<br>
+Safecopy now supports generic hardware access with O_DIRECT, as well as reading from /dev/raw devices.
+For this it was necessary to align the main read buffer with the blocksize address boundary,
+so DMA transfers to the read buffer are possible, bypassing CPU-based in-memory copying by the kernel.
+</p>
+<p>
 2009-07-15:
 <br>
 The test suite of safecopy has been rewritten to be more portable.
@@ -376,7 +383,7 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive.
 
 
-Safecopy 1.4 by CorvusCorax
+Safecopy 1.5 by CorvusCorax
 Usage: safecopy [options] &lt;source&gt; &lt;target&gt;
 Options:
 	--stage1 : Preset to rescue most of the data fast,
@@ -436,6 +443,8 @@ Options:
 	                Linux   floppy        controller reset, twaddle
 	            Default: 1
 	--sync : Use synchronized read calls (disable driver buffering).
+	         Safecopy will use O_DIRECT if supported by the OS
+	         and O_SYNC otherwise.
 	         Default: Asynchronous read buffering by the OS is allowed
 	-s &lt;blocks&gt; : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.

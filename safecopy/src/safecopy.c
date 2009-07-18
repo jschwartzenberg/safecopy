@@ -28,6 +28,8 @@
 
 #define _FILE_OFFSET_BITS 64
 // make off_t a 64 bit pointer on system that support it
+#define _GNU_SOURCE
+// allow usage of O_DIRECT if available
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -42,6 +44,14 @@
 #include <string.h>
 #include <stdarg.h>
 #include "arglist.h"
+
+// define syncmode - use O_DIRECT if supported
+#ifdef O_DIRECT
+	#define O_SAFECOPYSYNC O_DIRECT
+#else
+	#define O_SAFECOPYSYNC O_RSYNC
+#endif
+
 
 #define DEBUG_FLOW 1
 #define DEBUG_IO 2
@@ -157,6 +167,8 @@ void usage(char * name) {
 	fprintf(stdout,"	                Linux   floppy        controller reset, twaddle\n");
 	fprintf(stdout,"	            Default: %i\n",DEFLOWLEVEL);
 	fprintf(stdout,"	--sync : Use synchronized read calls (disable driver buffering).\n");
+	fprintf(stdout,"	         Safecopy will use O_DIRECT if supported by the OS\n");
+	fprintf(stdout,"	         and O_SYNC otherwise.\n");
 	fprintf(stdout,"	         Default: Asynchronous read buffering by the OS is allowed\n");
 	fprintf(stdout,"	-s <blocks> : Start position where to start reading.\n");
 	fprintf(stdout,"	              Will correspond to position 0 in the destination file.\n");
@@ -408,14 +420,14 @@ void markbadblocks(int destination, off_t writeposition, off_t remain, char* mar
 		cposition=lseek(destination,writeposition,SEEK_SET);
 		if (cposition<0) {
 			fprintf(stderr,"\nError: seek() in output failed");
-			perror("");
+			perror(" ");
 			return;
 		}
 		debug(DEBUG_IO,"debug: writing badblock marker to destination file: %llu bytes at %llu\n",writeremain,cposition);
 		writeblock=write(destination,databuffer+(writeoffset % blocksize),(blocksize>writeremain?writeremain:blocksize));
 		if (writeblock<=0) {
 			fprintf(stderr,"\nError: write to output failed");
-			perror("");
+			perror(" ");
 			return;
 		}
 		writeremain-=writeblock;
@@ -477,7 +489,7 @@ void realmarkoutput (
 				*xblocksin=fopen(xblocksinfile,"r");
 				if (*xblocksin==NULL) {
 					fprintf(stderr,"Error reopening exclusion badblock file for reading: %s",xblocksinfile);
-					perror("");
+					perror(" ");
 					*previousxblock=((unsigned)-1)>>1;
 					*lastxblock=((unsigned)-1)>>1;
 					return;
@@ -627,7 +639,7 @@ int main(int argc, char ** argv) {
 	// variables for handling read/written sizes/remainders
 	off_t remain,maxremain,block,writeblock,writeremain;
 	// pointer to main IO data buffer
-	char * databuffer;
+	char * databuffer,*databufferpool;
 	// a buffer for output text
 	char textbuffer[256];
 	// buffer pointer for sfgets() 
@@ -748,8 +760,12 @@ int main(int argc, char ** argv) {
 	// synchronous IO
 	syncmode=0;
 	if (arglist_arggiven(carglist,"--sync")==0) {
-		fprintf(stdout,"Using synchronized IO on source.\n");
-		syncmode=O_RSYNC;
+		if (O_SAFECOPYSYNC==O_SYNC) {
+			fprintf(stdout,"Using synchronized IO on source. (O_SYNC)\n");
+		} else {
+			fprintf(stdout,"Using synchronized IO on source. (O_DIRECT)\n");
+		}
+		syncmode=O_SAFECOPYSYNC;
 	}
 
 	// find out source file size and block size
@@ -772,7 +788,7 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"File size: %llu\n",filesize);
 	} else {
 		fprintf(stderr,"Filesize not reported by stat(), trying seek().\n");
-		source=open(sourcefile,O_RDONLY | syncmode);
+		source=open(sourcefile,O_RDONLY | O_RSYNC);
 		if (source) {
 			filesize=lseek(source,0,SEEK_END);
 			close(source);
@@ -911,11 +927,13 @@ int main(int argc, char ** argv) {
 		filesize=startoffset+length;
 	}
 
-	databuffer=(char*)malloc((blocksize+1)*sizeof(char));
-	if (databuffer==NULL) {
-		perror("MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER");
+	databufferpool=(char*)malloc(((2*blocksize)+1)*sizeof(char));
+	if (databufferpool==NULL) {
+		perror("MEMORY ALLOCATION ERROR!\nCOULDNT ALLOCATE MAIN BUFFER ");
 		return 2;
 	}
+	// align databuffer to block size - needed to support O_DIRECT and /dev/raw devices
+	databuffer=databufferpool+blocksize-(((off_t)databufferpool)%blocksize);
 
 // 3.opening io handles
 		
@@ -924,7 +942,7 @@ int main(int argc, char ** argv) {
 	source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 	if (source==-1) {
 		fprintf(stderr,"Error opening sourcefile: %s",sourcefile);
-		perror("");
+		perror(" ");
 		if (human) usage(argv[0]);
 		arglist_kill(carglist);
 		return 2;
@@ -934,7 +952,7 @@ int main(int argc, char ** argv) {
 		if (xblocksin==NULL) {
 			close(source);
 			fprintf(stderr,"Error opening exclusion badblock file for reading: %s",xblocksinfile);
-			perror("");
+			perror(" ");
 			arglist_kill(carglist);
 			return 2;
 		}
@@ -946,7 +964,7 @@ int main(int argc, char ** argv) {
 			close(source);
 			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening badblock file for reading: %s",bblocksinfile);
-			perror("");
+			perror(" ");
 			arglist_kill(carglist);
 			return 2;
 		}
@@ -956,7 +974,7 @@ int main(int argc, char ** argv) {
 			fclose(bblocksin);
 			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening destination: %s",destfile);
-			perror("");
+			perror(" ");
 			if (human) usage(argv[0]);
 			arglist_kill(carglist);
 			return 2;
@@ -981,7 +999,7 @@ int main(int argc, char ** argv) {
 			close(source);
 			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening destination: %s",destfile);
-			perror("");
+			perror(" ");
 			if (human) usage(argv[0]);
 			arglist_kill(carglist);
 			return 2;
@@ -995,7 +1013,7 @@ int main(int argc, char ** argv) {
 			if (incremental==1) fclose(bblocksin);
 			if (excluding==1) fclose(xblocksin);
 			fprintf(stderr,"Error opening badblock file for writing: %s",bblocksoutfile);
-			perror("");
+			perror(" ");
 			arglist_kill(carglist);
 			return 2;
 		}
@@ -1044,7 +1062,7 @@ int main(int argc, char ** argv) {
 	// attempt to seek to start position to find out wether source file is seekable
 	cposition=lseek(source,startoffset,SEEK_SET);
 	if (cposition<0) {
-		perror("Warning: Input file is not seekable");
+		perror("Warning: Input file is not seekable ");
 		seekable=0;
 		close(source);
 		cposition=emergency_seek(startoffset,0,blocksize,seekscriptfile);
@@ -1053,7 +1071,7 @@ int main(int argc, char ** argv) {
 		}
 		source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode);
 		if (source==-1) {
-			perror("Error reopening sourcefile after external seek");
+			perror("Error reopening sourcefile after external seek ");
 			close(destination);
 			if (incremental==1) fclose(bblocksin);
 			if (excluding==1) fclose(xblocksin);
@@ -1140,7 +1158,7 @@ int main(int argc, char ** argv) {
 					if (xblocksin==NULL) {
 						excluding=0;
 						fprintf(stderr,"Error reopening exclusion badblock file for reading: %s",xblocksinfile);
-						perror("");
+						perror(" ");
 						wantabort=1;
 						break;
 					}
@@ -1246,7 +1264,7 @@ int main(int argc, char ** argv) {
 						// reopen input file
 						source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 						if (source==-1) {
-							perror("\nError reopening sourcefile after external seek");
+							perror("\nError reopening sourcefile after external seek ");
 							close(destination);
 							if (incremental==1) fclose(bblocksin);
 							if (excluding==1) fclose(xblocksin);
@@ -1439,7 +1457,7 @@ int main(int argc, char ** argv) {
 					cposition=lseek(destination,writeposition,SEEK_SET);
 					if (cposition<0) {
 						fprintf(stderr,"\nError: seek() in %s failed",destfile);
-						perror("");
+						perror(" ");
 						close(destination);
 						close(source);
 						if (incremental==1) fclose(bblocksin);
@@ -1452,7 +1470,7 @@ int main(int argc, char ** argv) {
 					writeblock=write(destination,databuffer+writeoffset,writeremain);
 					if (writeblock<=0) {
 						fprintf(stderr,"\nError: write to %s failed",destfile);
-						perror("");
+						perror(" ");
 						close(destination);
 						close(source);
 						if (incremental==1) fclose(bblocksin);
@@ -1468,7 +1486,7 @@ int main(int argc, char ** argv) {
 			}
 		} else if (block<0) {
 // 6.f.2 failed read
-			debug(DEBUG_IO,"debug: read failed\n");
+			debug(DEBUG_IO,"debug: read failed: %s\n",strerror(errno));
 			// operation failed
 			counter=1;
 			// use low level IO for error correction if allowed
@@ -1542,23 +1560,24 @@ int main(int argc, char ** argv) {
 			// do some forced seeks to move head around.
 			for (cseeks=0;cseeks<seeks;cseeks++) {
 				debug(DEBUG_SEEK,"debug: forced head realignment\n");
+				// note. must use O_RSYNC since with O_DIRECT / raw devices, lseek to end of file might not work
 				source=open(sourcefile,O_RDONLY|O_RSYNC );
 				if (source) {
 					lseek(source,0,SEEK_SET);
-					read(source,&textbuffer,1);
+					read(source,databuffer,blocksize);
 					close(source);
 				}
 				source=open(sourcefile,O_RDONLY|O_RSYNC );
 				if (source) {
 					lseek(source,-blocksize,SEEK_END);
-					read(source,&textbuffer,1);
+					read(source,databuffer,blocksize);
 					close(source);
 				}
 				if (wantabort) break;
 			}
 			source=open(sourcefile,O_RDONLY | O_NONBLOCK | syncmode );
 			if (source==-1) {
-				perror("\nError reopening sourcefile after read error");
+				perror("\nError reopening sourcefile after read error ");
 				close(destination);
 				if (incremental==1) fclose(bblocksin);
 				if (excluding==1) fclose(xblocksin);
