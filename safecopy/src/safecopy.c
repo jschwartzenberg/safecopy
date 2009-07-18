@@ -38,6 +38,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -933,7 +934,7 @@ int main(int argc, char ** argv) {
 		return 2;
 	}
 	// align databuffer to block size - needed to support O_DIRECT and /dev/raw devices
-	databuffer=databufferpool+blocksize-(((off_t)databufferpool)%blocksize);
+	databuffer=databufferpool+blocksize-(((uintptr_t)databufferpool)%blocksize);
 
 // 3.opening io handles
 		
