@@ -256,6 +256,30 @@ by the file specified with \-X are save from being overwritten.
 .IP
 \fBDefault\fR: none
 .TP
+\fB\-\-debug\fR <\fIlevel\fR>
+Enable debug output. Level is a bitfield, add values together for more information:
+.br
+	program flow:    	1
+.br
+	IO control:      	2
+.br
+	badblock marking:	4
+.br
+	seeking:         	8
+.br
+	incremental mode:	16
+.br
+	exclude mode:    	32
+.br
+or for all debug output:	255
+.IP
+\fBDefault\fR: 0
+.TP
+\fB\-T\fR <\fItimingfile\fR>
+Write sector read timing information into this file for later analysis.
+.IP
+\fBDefault\fR: none
+.TP
 \fB\-h\fR, \fB\-\-help\fR
 Show the program help text.
 

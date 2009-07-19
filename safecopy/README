@@ -419,6 +419,19 @@ Options:
 	              Blocks not in the -I file, or covered by the file
 	              specified with -X are save from being overwritten.
 	              Default: none
+	--debug <level> : Enable debug output. Level is a bitfield,
+	                  add values together for more information:
+	                     program flow:     1
+	                     IO control:       2
+	                     badblock marking: 4
+	                     seeking:          8
+	                     incremental mode: 16
+	                     exclude mode:     32
+	                  or for all debug output: 255
+	                  Default: 0
+	-T <timingfile> : Write sector read timing information into
+	                  this file for later analysis.
+	                  Default: none
 	-h | --help : Show this text
 
 Valid parameters for -f -r -b <size> options are:

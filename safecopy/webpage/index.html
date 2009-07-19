@@ -16,11 +16,16 @@ safecopy is a data recovery tool which tries to extract as much data as possible
 </h2>
 <h3>News:</h3>
 <p>
-2009-07-18:
+2009-07-19:
 <br>
-Safecopy now supports generic hardware access with O_DIRECT, as well as reading from /dev/raw devices.
-For this it was necessary to align the main read buffer with the blocksize address boundary,
-so DMA transfers to the read buffer are possible, bypassing CPU-based in-memory copying by the kernel.
+Safecopy now supports generic hardware access with O_DIRECT, as well as reading
+from /dev/raw devices. Direct IO is enabled with the --sync option.  For this
+it was necessary to align the main read buffer with the blocksize address
+boundary, so DMA transfers to the read buffer are possible, bypassing CPU-based
+in-memory copying by the kernel.
+<br>
+The --debug switch, present since about safecopy 1.3, has now been documented, and a new switch -T &lt;timingfile&gt; will generate a statistics file with the read timing information in microseconds for each read block. This is usefull for statistical analysis of bad hardware behaviour and finding strategies to speed up recovery tools like safecopy, ddrescue and the like.<br>
+Read <a href="analysis.html"/>Analysis of damaged hardware statistics</a> for more information about what this is good for.
 </p>
 <p>
 2009-07-15:
@@ -384,7 +389,7 @@ FAQ:
 
 
 Safecopy 1.5 by CorvusCorax
-Usage: safecopy [options] &lt;source&gt; &lt;target&gt;
+Usage: ./safecopy [options] &lt;source&gt; &lt;target&gt;
 Options:
 	--stage1 : Preset to rescue most of the data fast,
 	           using no retries and avoiding bad areas.
@@ -495,6 +500,19 @@ Options:
 	              Blocks not in the -I file, or covered by the file
 	              specified with -X are save from being overwritten.
 	              Default: none
+	--debug &lt;level&gt; : Enable debug output. Level is a bitfield,
+	                  add values together for more information:
+	                     program flow:     1
+	                     IO control:       2
+	                     badblock marking: 4
+	                     seeking:          8
+	                     incremental mode: 16
+	                     exclude mode:     32
+	                  or for all debug output: 255
+	                  Default: 0
+	-T &lt;timingfile&gt; : Write sector read timing information into
+	                  this file for later analysis.
+	                  Default: none
 	-h | --help : Show this text
 
 Valid parameters for -f -r -b &lt;size&gt; options are:

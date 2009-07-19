@@ -80,6 +80,7 @@
 #define DEFOUTPUTBB NULL
 #define DEFINPUTBB NULL
 #define DEFEXCLBB NULL
+#define DEFTIMINGFILESTRING NULL
 
 #define VERY_FAST 100
 #define FAST VERY_FAST*100
@@ -220,6 +221,19 @@ void usage(char * name) {
 	fprintf(stdout,"	              Blocks not in the -I file, or covered by the file\n");
 	fprintf(stdout,"	              specified with -X are save from being overwritten.\n");
 	fprintf(stdout,"	              Default: none\n");
+	fprintf(stdout,"	--debug <level> : Enable debug output. Level is a bitfield,\n");
+	fprintf(stdout,"	                  add values together for more information:\n");
+	fprintf(stdout,"	                     program flow:     %i\n",DEBUG_FLOW);
+	fprintf(stdout,"	                     IO control:       %i\n",DEBUG_IO);
+	fprintf(stdout,"	                     badblock marking: %i\n",DEBUG_BADBLOCKS);
+	fprintf(stdout,"	                     seeking:          %i\n",DEBUG_SEEK);
+	fprintf(stdout,"	                     incremental mode: %i\n",DEBUG_INCREMENTAL);
+	fprintf(stdout,"	                     exclude mode:     %i\n",DEBUG_EXCLUDE);
+	fprintf(stdout,"	                  or for all debug output: %i\n",255);
+	fprintf(stdout,"	                  Default: 0\n");
+	fprintf(stdout,"	-T <timingfile> : Write sector read timing information into\n");
+	fprintf(stdout,"	                  this file for later analysis.\n");
+	fprintf(stdout,"	                  Default: none\n");
 	fprintf(stdout,"	-h | --help : Show this text\n\n");
 	fprintf(stdout,"Valid parameters for -f -r -b <size> options are:\n");
 	fprintf(stdout,"	<integer>	Amount in bytes - i.e. 1024\n");
@@ -626,13 +640,14 @@ int main(int argc, char ** argv) {
 	char *bblocksoutstring=DEFOUTPUTBB;
 	char *xblocksinstring=DEFEXCLBB;
 	char *failuredefstring=DEFFAILSTRING;
+	char *timingfilestring=DEFTIMINGFILESTRING; 
 	int retriesdef=DEFRETRIES;
 	int headmovedef=DEFHEADMOVE;
 	int lowleveldef=DEFLOWLEVEL;
 	// file descriptors
 	int source,destination,bblocksout;
 	// high level file descriptor
-	FILE *bblocksin,*xblocksin;
+	FILE *bblocksin,*xblocksin,*timingfile;
 
 	// file offset variables
 	off_t readposition,cposition,sposition,writeposition;
@@ -703,6 +718,7 @@ int main(int argc, char ** argv) {
 	arglist_addarg (carglist,"-S",1);
 	arglist_addarg (carglist,"-Z",1);
 	arglist_addarg (carglist,"-M",1);
+	arglist_addarg (carglist,"-T",1);
 
 	// find out wether the user is wetware
 	human=(isatty(1) & isatty(2));
@@ -898,6 +914,11 @@ int main(int argc, char ** argv) {
 		fprintf(stdout,"Seek script (fallback): %s\n",seekscriptfile);
 	}
 
+	if (arglist_arggiven(carglist,"-T")==0) {
+		timingfilestring=arglist_parameter(carglist,"-T",0);
+		fprintf(stdout,"Write sector timing information to file: %s\n",timingfilestring);
+	}
+
 	if (arglist_arggiven(carglist,"-M")==0) {
 		failuredefstring=arglist_parameter(carglist,"-M",0);
 		if (failuredefstring==NULL) failuredefstring="";
@@ -1020,6 +1041,22 @@ int main(int argc, char ** argv) {
 		}
 	}
 
+	timingfile=NULL;
+	if (timingfilestring!=NULL) {
+		timingfile=fopen(timingfilestring,"w");
+		if (timingfile==NULL) {
+			close(source);
+			close(destination);
+			if (incremental==1) fclose(bblocksin);
+			if (excluding==1) fclose(xblocksin);
+			if (bblocksout) close(bblocksout);
+			fprintf(stderr,"Error opening timing file for writing: %s",bblocksoutfile);
+			perror(" ");
+			arglist_kill(carglist);
+			return 2;
+		}
+	}
+
 // 4.initialisations
 
 	// setting signal handler
@@ -1077,6 +1114,7 @@ int main(int argc, char ** argv) {
 			if (incremental==1) fclose(bblocksin);
 			if (excluding==1) fclose(xblocksin);
 			if (bblocksoutfile!=NULL) close(bblocksout);
+			if (timingfile!=NULL) fclose(timingfile);
 			arglist_kill(carglist);
 			return 2;
 		}
@@ -1270,6 +1308,7 @@ int main(int argc, char ** argv) {
 							if (incremental==1) fclose(bblocksin);
 							if (excluding==1) fclose(xblocksin);
 							if (bblocksoutfile!=NULL) close(bblocksout);
+							if (timingfile!=NULL) fclose(timingfile);
 							arglist_kill(carglist);
 							return 2;
 						}
@@ -1338,6 +1377,9 @@ int main(int argc, char ** argv) {
 		// time reading for quality calculation
 		gettimeofday(&newtime,NULL);
 		elapsed=timediff(oldtime,newtime);
+		if (timingfile) {
+			fprintf(timingfile,"%llu %lu\n",sposition/blocksize,elapsed);
+		}
 
 // 6.e feedback - calculate and display user feedback information
 
@@ -1464,6 +1506,7 @@ int main(int argc, char ** argv) {
 						if (incremental==1) fclose(bblocksin);
 						if (excluding==1) fclose(xblocksin);
 						if (bblocksoutfile!=NULL) close(bblocksout);
+						if (timingfile!=NULL) fclose(timingfile);
 						arglist_kill(carglist);
 						return 2;
 					}
@@ -1477,6 +1520,7 @@ int main(int argc, char ** argv) {
 						if (incremental==1) fclose(bblocksin);
 						if (excluding==1) fclose(xblocksin);
 						if (bblocksoutfile!=NULL) close(bblocksout);
+						if (timingfile!=NULL) fclose(timingfile);
 						arglist_kill(carglist);
 						return 2;
 					}
@@ -1583,6 +1627,7 @@ int main(int argc, char ** argv) {
 				if (incremental==1) fclose(bblocksin);
 				if (excluding==1) fclose(xblocksin);
 				if (bblocksoutfile!=NULL) close(bblocksout);
+				if (timingfile!=NULL) fclose(timingfile);
 				arglist_kill(carglist);
 				return 2;
 			}
@@ -1628,6 +1673,7 @@ int main(int argc, char ** argv) {
 	if (incremental==1) fclose(bblocksin);
 	if (excluding==1) fclose(xblocksin);
 	if (bblocksoutfile!=NULL) close(bblocksout);
+	if (timingfile!=NULL) fclose(timingfile);
 	arglist_kill(carglist);
 	return(0);
 }
