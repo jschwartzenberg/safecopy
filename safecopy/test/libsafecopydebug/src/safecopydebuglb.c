@@ -10,9 +10,7 @@
 #endif
 
 #define CONFIGFILE "safecopydebug.cfg"
-#define MAXSLOWSECTORS 65536
-#define MAXSOFTERRORS 65536
-#define MAXHARDERRORS 65536
+#define MAXLIST 1000000
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -52,16 +50,19 @@ int __open64_2(const char*,int);
 ssize_t write(int, const void *, size_t);
 
 
-static int slowsector[MAXSOFTERRORS]={0};
-static int softerror[MAXSOFTERRORS]={0};
-static int softerrorcount[MAXSOFTERRORS]={0};
-static int harderror[MAXHARDERRORS]={0};
+static int slowsector[MAXLIST]={0};
+static int softerror[MAXLIST]={0};
+static int softerrorcount[MAXLIST]={0};
+static int harderror[MAXLIST]={0};
 static int slowsectordelay=0;
 static int softerrordelay=0;
 static int harderrordelay=0;
 static int slowsectors=0;
+static int slowsectorptr=0;
 static int softerrors=0;
+static int softerrorptr=0;
 static int harderrors=0;
+static int harderrorptr=0;
 static int blocksize=1024;
 static int softfailcount=0;
 static int filesize=10240;
@@ -76,10 +77,69 @@ static inline void delay(int milliseconds) {
 	nanosleep(&x,NULL);
 }
 
+void addtolist(int *array,int *count,int value) {
+// insert value into sorted array of length *count
+	if (*count==MAXLIST) {
+		fprintf(stderr,"debugfile: Cannot store any more sectors in list - out of hardcoded memory limit!\n");
+		return;
+	}
+	if (!*count) {
+		array[*count]=value;
+		*count=1;
+	} else {
+		if (value>array[*count]) {
+			*count=*count+1;
+			array[*count]=value;
+		} else {
+			int t;
+			for (t=0; t<*count;t++) {
+				if (array[t]==value) {
+					return;
+				} else if (array[t]<value) {
+					memmove(&array[t+1],&array[t],(MAXLIST-t)-1);
+					array[t]=value;
+					*count=*count+1;
+					return;
+				}
+			}
+		}
+
+	}
+}
+
+static inline int isinlist(int *array, int *pos, int *count,int value) {
+// tell if a value is ina sorted list, speed up assuming the list is asked sequentially
+	if (!*count) return 0;
+	if (value<array[0]) return 0;
+	if (value==array[0]) {
+		fprintf(stderr," sec 0 matches at 0\n");
+		*pos=0;
+		return 1;
+	}
+	if (value>array[*count]) return 0;
+	if (value==array[*count]) {
+		*pos=*count;
+		return 1;
+	}
+	// move current pointer forward if necessary
+	while (*pos<*count && value>array[*pos]) {
+		*pos=*pos+1;
+	}
+	// move current pointer backward if necessary
+	while (*pos>0 && value<array[*pos]) {
+		*pos=*pos-1;
+	}
+	// check wether we are where we want to be
+	if (array[*pos]==value) return 1;
+	return 0;
+}
+
+
 void readoptions() {
 	FILE *fd;
 	char line[256];
 	char *number;
+	int x;
 
 	softerrors=0;
 	harderrors=0;
@@ -116,18 +176,18 @@ void readoptions() {
 				sscanf(number,"%u",&harderrordelay);
 				fprintf(stderr,"debugfile delay on hard errors: %u ms\n",harderrordelay);
 			} else if (strcmp(line,"slow")==0) {
-				sscanf(number,"%u",&slowsector[slowsectors]);
-				fprintf(stderr,"debugfile simulating read difficulty in block: %u\n",slowsector[slowsectors]);
-				slowsectors++;
+				sscanf(number,"%u",&x);
+				addtolist(slowsector,&slowsectors,x);
+				fprintf(stderr,"debugfile simulating read difficulty in block: %u\n",x);
 			} else if (strcmp(line,"softfail")==0) {
-				sscanf(number,"%u",&softerror[softerrors]);
-				fprintf(stderr,"debugfile simulating soft error in block: %u\n",softerror[softerrors]);
+				sscanf(number,"%u",&x);
+				addtolist(softerror,&softerrors,x);
+				fprintf(stderr,"debugfile simulating soft error in block: %u\n",x);
 				softerrorcount[softerrors]=0;
-				softerrors++;
 			} else if (strcmp(line,"hardfail")==0) {
-				sscanf(number,"%u",&harderror[harderrors]);
-				fprintf(stderr,"debugfile simulating hard error in block: %u\n",harderror[harderrors]);
-				harderrors++;
+				sscanf(number,"%u",&x);
+				addtolist(harderror,&harderrors,x);
+				fprintf(stderr,"debugfile simulating hard error in block: %u\n",x);
 			}
 		}
 	}
@@ -283,7 +343,7 @@ off64_t lseek64(int filedes, off64_t offset, int whence) {
 
 ssize_t read(int fd,void *buf,size_t count) {
 	ssize_t result;
-	int count1,count2;
+	int count1;
 	int block1,block2;
 	int max=filesize;
 	//myprint("read called\n");
@@ -303,47 +363,37 @@ ssize_t read(int fd,void *buf,size_t count) {
 		}
 		block1=current/blocksize;
 		block2=(current+result)/blocksize;
-		for (count2=0;count2<slowsectors;count2++) {
-			if (slowsector[count2]==block1) {
-				delay(slowsectordelay);
-			}
+		if (isinlist(slowsector,&slowsectorptr,&slowsectors,block1)) {
+			delay(slowsectordelay);
 		}
-		for (count2=0;count2<softerrors;count2++) {
-			if (softerror[count2]==block1) {
+		if (isinlist(softerror,&softerrorptr,&softerrors,block1)) {
 				delay(softerrordelay);
-				if (softerrorcount[count2]++<softfailcount) {
+				if (softerrorcount[softerrorptr]++<softfailcount) {
 					myprint(" simulated soft failure!\n");
 					errno=EIO;
 					return -1;
 				} else {
-					if (softerrorcount[count2]>softfailcount+1) {
+					if (softerrorcount[softerrorptr]>softfailcount+1) {
 						myprint(" simulated soft failure turned hard!\n");
 						errno=EIO;
 						return -1;
 					}
 					myprint(" simulated soft recovery:");
-					softerrorcount[count2]-=2;
+					softerrorcount[softerrorptr]-=2;
 				}
-			}
 		}
-		for (count2=0;count2<harderrors;count2++) {
-			if (harderror[count2]==block1) {
-				delay(harderrordelay);
-				myprint(" simulated hard failure!\n");
-				errno=EIO;
-				return -1;
-			}
+		if (isinlist(harderror,&harderrorptr,&harderrors,block1)) {
+			delay(harderrordelay);
+			myprint(" simulated hard failure!\n");
+			errno=EIO;
+			return -1;
 		}
 		for (count1=block1+1;count1<=block2;count1++) {
-			for (count2=0;count2<softerrors;count2++) {
-				if(softerror[count2]==count1 && max>count1*blocksize) {
-					max=count1*blocksize;
-				}
+			if (isinlist(softerror,&softerrorptr,&softerrors,count1) && max>count1*blocksize) {
+				max=count1*blocksize;
 			}
-			for (count2=0;count2<harderrors;count2++) {
-				if(harderror[count2]==count1 && max>count1*blocksize) {
-					max=count1*blocksize;
-				}
+			if (isinlist(harderror,&harderrorptr,&harderrors,count1) && max>count1*blocksize) {
+				max=count1*blocksize;
 			}
 		}
 		if (current+result>max) {
