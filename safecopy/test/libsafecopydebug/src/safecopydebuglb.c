@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 //#include <unistd.h>
 #include <string.h>
@@ -32,9 +33,6 @@ static int (*realclose)(int);
 static off_t (*reallseek)(int,off_t,int);
 static ssize_t (*realread)(int,void*,size_t);
 
-static int mydesc=-1;
-static off_t current=0;
-
 void _init(void);
 int open(const char*,int,...);
 int open64(const char*,int,...);
@@ -49,14 +47,24 @@ int __open64_2(const char*,int);
 
 ssize_t write(int, const void *, size_t);
 
+struct timedata {
+	off64_t sector;
+	int failtime;
+	int goodtime;
+};
 
-static int slowsector[MAXLIST]={0};
-static int softerror[MAXLIST]={0};
-static int softerrorcount[MAXLIST]={0};
-static int harderror[MAXLIST]={0};
-static int slowsectordelay=0;
-static int softerrordelay=0;
-static int harderrordelay=0;
+static int mydesc=-1;
+static off_t current=0;
+
+static struct timeval starttime,endtime;
+static unsigned long granularity, sleeptime;
+
+static struct timedata slowsector[MAXLIST];
+static struct timedata slowsector[MAXLIST];
+static struct timedata softerror[MAXLIST];
+static int softerrorcount[MAXLIST];
+static struct timedata harderror[MAXLIST];
+static unsigned long slowsectordelay=0;
 static int slowsectors=0;
 static int slowsectorptr=0;
 static int softerrors=0;
@@ -67,70 +75,121 @@ static int blocksize=1024;
 static int softfailcount=0;
 static int filesize=10240;
 static char filename[256]="/dev/urandom";
+static int verbosity=1;
 
+// calculate difference in usecs between two struct timevals
+static inline long int timediff() {
+	static long int usecs;
+	usecs=endtime.tv_usec-starttime.tv_usec;
+	usecs=usecs+((endtime.tv_sec-starttime.tv_sec)*1000000);
+	return usecs;
 
-static inline void delay(int milliseconds) {
-	static struct timespec x;
-	if (milliseconds==0) return;
-	x.tv_sec=milliseconds/1000;
-	x.tv_nsec=(milliseconds%1000)*1000000;
-	nanosleep(&x,NULL);
 }
 
-void addtolist(int *array,int *count,int value) {
+static inline void delay(long microseconds) {
+	sleeptime=microseconds;
+}
+
+static inline void dodelay(int factor) {
+	static unsigned long x;
+	x=1;
+	x=x<<factor;
+	delay(x*slowsectordelay);
+}
+
+static inline void dosleep() {
+	// sleep for the remaining time (if any)
+	// if remaining time is smaller than  granularity
+	// we are evil and do busy waiting
+	static struct timespec x;
+	static unsigned long timed;
+
+	gettimeofday(&endtime,NULL);
+	timed=timediff();
+	while (timed<sleeptime) {
+		if (sleeptime-timed>granularity) {
+			x.tv_sec=0;
+			x.tv_nsec=1;
+			nanosleep(&x,NULL);
+		}
+		gettimeofday(&endtime,NULL);
+		timed=timediff();
+	}
+
+}
+
+void addtolist(struct timedata *array,int *count,struct timedata *value) {
 // insert value into sorted array of length *count
 	if (*count==MAXLIST) {
-		fprintf(stderr,"debugfile: Cannot store any more sectors in list - out of hardcoded memory limit!\n");
+		fprintf(stderr,"debugfile error: cannot store any more sectors in list - out of hardcoded memory limit!\n");
 		return;
 	}
 	if (!*count) {
-		array[*count]=value;
+		// first element in list
+		array[*count].sector=value->sector;
+		array[*count].failtime=value->failtime;
+		array[*count].goodtime=value->goodtime;
 		*count=1;
 	} else {
-		if (value>array[*count]) {
+		if (value->sector>array[*count-1].sector) {
+			// default case, add to end of list
+			array[*count].sector=value->sector;
+			array[*count].failtime=value->failtime;
+			array[*count].goodtime=value->goodtime;
 			*count=*count+1;
-			array[*count]=value;
 		} else {
+			// stupid case, add somewhere else
 			int t;
-			for (t=0; t<*count;t++) {
-				if (array[t]==value) {
+			for (t=*count-1; t>=0;t--) {
+				// go back in the list to see where it has to be stuck in
+				if (array[t].sector==value->sector) {
+					// unless its already there
 					return;
-				} else if (array[t]<value) {
-					memmove(&array[t+1],&array[t],(MAXLIST-t)-1);
-					array[t]=value;
+				} else if (array[t].sector<value->sector) {
+					// no it wasnt, here we stick it in.
+					memmove(&array[t+2],&array[t+1],((MAXLIST-t)-2)*sizeof(struct timedata));
+					array[t+1].sector=value->sector;
+					array[t+1].failtime=value->failtime;
+					array[t+1].goodtime=value->goodtime;
 					*count=*count+1;
 					return;
 				}
 			}
+			// hmm we went through the entire list and only bigger elements
+			// guess we have to stick it at the very start
+			memmove(&array[1],&array[0],(MAXLIST-1)*sizeof(struct timedata));
+			array[0].sector=value->sector;
+			array[0].failtime=value->failtime;
+			array[0].goodtime=value->goodtime;
+			*count=*count+1;
+			return;
 		}
-
 	}
 }
 
-static inline int isinlist(int *array, int *pos, int *count,int value) {
+static inline int isinlist(struct timedata *array, int *pos, int *count,off64_t sector) {
 // tell if a value is ina sorted list, speed up assuming the list is asked sequentially
 	if (!*count) return 0;
-	if (value<array[0]) return 0;
-	if (value==array[0]) {
-		fprintf(stderr," sec 0 matches at 0\n");
+	if (sector<array[0].sector) return 0;
+	if (sector==array[0].sector) {
 		*pos=0;
 		return 1;
 	}
-	if (value>array[*count]) return 0;
-	if (value==array[*count]) {
-		*pos=*count;
+	if (sector>array[*count-1].sector) return 0;
+	if (sector==array[*count-1].sector) {
+		*pos=*count-1;
 		return 1;
 	}
 	// move current pointer forward if necessary
-	while (*pos<*count && value>array[*pos]) {
+	while (*pos<*count-1 && sector>array[*pos].sector) {
 		*pos=*pos+1;
 	}
 	// move current pointer backward if necessary
-	while (*pos>0 && value<array[*pos]) {
+	while (*pos>0 && sector<array[*pos].sector) {
 		*pos=*pos-1;
 	}
 	// check wether we are where we want to be
-	if (array[*pos]==value) return 1;
+	if (array[*pos].sector==sector) return 1;
 	return 0;
 }
 
@@ -139,7 +198,9 @@ void readoptions() {
 	FILE *fd;
 	char line[256];
 	char *number;
-	int x;
+	int t;
+	struct timedata x;
+	struct timespec tx;
 
 	softerrors=0;
 	harderrors=0;
@@ -148,46 +209,57 @@ void readoptions() {
 		perror("debugfile could not open config file "CONFIGFILE);
 		return;
 	}
+	gettimeofday(&starttime,NULL);
+	for (t=0;t<10;t++) {
+		tx.tv_sec=0;
+		tx.tv_nsec=1;
+		nanosleep(&tx,NULL);
+	}
+	gettimeofday(&endtime,NULL);
+	// granularity is set higher than it is by about 1/4
+	granularity=timediff()/7;
+	fprintf(stderr,"debugfile time granularity: %lu usecs\ndebugfile everything shorter will be busy-waiting\n",granularity);
+
 	while (fgets(line,255,fd)) {
 		number=strchr(line,'=');
 		if (number) {
 			*number=0;
 			number++;
 			current=0;
-			if (strcmp(line,"blocksize")==0) {
+			x.sector=0;
+			x.goodtime=0;
+			x.failtime=0;
+			if (strcmp(line,"verbose")==0) {
+				sscanf(number,"%u",&verbosity);
+				fprintf(stderr,"debugfile verbosity: %u\n",verbosity);
+			} else if (strcmp(line,"blocksize")==0) {
 				sscanf(number,"%u",&blocksize);
-				fprintf(stderr,"debugfile simulated blocksize: %u\n",blocksize);
+				if (verbosity) fprintf(stderr,"debugfile simulated blocksize: %u\n",blocksize);
 			} else if (strcmp(line,"filesize")==0) {
 				sscanf(number,"%u",&filesize);
-				fprintf(stderr,"debugfile simulated filesize: %u\n",filesize);
+				if (verbosity) fprintf(stderr,"debugfile simulated filesize: %u\n",filesize);
 			} else if (strcmp(line,"source")==0) {
 				sscanf(number,"%s",filename);
-				fprintf(stderr,"debugfile opening data source: %s\n",filename);
+				if (verbosity) fprintf(stderr,"debugfile opening data source: %s\n",filename);
 			} else if (strcmp(line,"softfailcount")==0) {
 				sscanf(number,"%u",&softfailcount);
-				fprintf(stderr,"debugfile simulated soft error count: %u\n",softfailcount);
-			} else if (strcmp(line,"delayslow")==0) {
-				sscanf(number,"%u",&slowsectordelay);
-				fprintf(stderr,"debugfile delay on \"slow\" sectors: %u ms\n",slowsectordelay);
-			} else if (strcmp(line,"delaysoft")==0) {
-				sscanf(number,"%u",&softerrordelay);
-				fprintf(stderr,"debugfile delay on soft errors: %u ms\n",softerrordelay);
-			} else if (strcmp(line,"delayhard")==0) {
-				sscanf(number,"%u",&harderrordelay);
-				fprintf(stderr,"debugfile delay on hard errors: %u ms\n",harderrordelay);
+				if (verbosity) fprintf(stderr,"debugfile simulated soft error count: %u\n",softfailcount);
+			} else if (strcmp(line,"delay")==0) {
+				sscanf(number,"%lu",&slowsectordelay);
+				if (verbosity) fprintf(stderr,"debugfile delay on any sectors: %lu usec\n",slowsectordelay);
 			} else if (strcmp(line,"slow")==0) {
-				sscanf(number,"%u",&x);
-				addtolist(slowsector,&slowsectors,x);
-				fprintf(stderr,"debugfile simulating read difficulty in block: %u\n",x);
+				sscanf(number,"%llu %u",&x.sector,&x.goodtime);
+				addtolist(slowsector,&slowsectors,&x);
+				if (verbosity) fprintf(stderr,"debugfile simulating read difficulty in block: %llu\n",x.sector);
 			} else if (strcmp(line,"softfail")==0) {
-				sscanf(number,"%u",&x);
-				addtolist(softerror,&softerrors,x);
-				fprintf(stderr,"debugfile simulating soft error in block: %u\n",x);
+				sscanf(number,"%llu %u %u",&x.sector,&x.goodtime,&x.failtime);
+				addtolist(softerror,&softerrors,&x);
+				if (verbosity) fprintf(stderr,"debugfile simulating soft error in block: %llu\n",x.sector);
 				softerrorcount[softerrors]=0;
 			} else if (strcmp(line,"hardfail")==0) {
-				sscanf(number,"%u",&x);
-				addtolist(harderror,&harderrors,x);
-				fprintf(stderr,"debugfile simulating hard error in block: %u\n",x);
+				sscanf(number,"%llu %u",&x.sector,&x.failtime);
+				addtolist(harderror,&harderrors,&x);
+				if (verbosity) fprintf(stderr,"debugfile simulating hard error in block: %llu\n",x.sector);
 			}
 		}
 	}
@@ -196,6 +268,7 @@ void readoptions() {
 
 static inline void myprint(char* text) {
 	size_t len=0;
+	if (!verbosity) return;
 	while ((char) *(text+len)) len++;
 	write(2,text,len);
 }
@@ -208,6 +281,7 @@ static inline void myprinthex(unsigned int num) {
 	char current='0';
 	int pos;
 	pos=16;
+	if (!verbosity) return;
 	myprint("0x");
 	if (num2==0) {
 		myprint("0");
@@ -348,6 +422,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 	int max=filesize;
 	//myprint("read called\n");
 	if ( fd==mydesc && mydesc!=-1) {
+		gettimeofday(&starttime,NULL);
 		result=count;
 		myprint("reading from debug file: ");
 		myprintint(count);
@@ -363,30 +438,37 @@ ssize_t read(int fd,void *buf,size_t count) {
 		}
 		block1=current/blocksize;
 		block2=(current+result)/blocksize;
-		if (isinlist(slowsector,&slowsectorptr,&slowsectors,block1)) {
-			delay(slowsectordelay);
-		}
-		if (isinlist(softerror,&softerrorptr,&softerrors,block1)) {
-				delay(softerrordelay);
+		if (isinlist(harderror,&harderrorptr,&harderrors,block1)) {
+			myprint(" simulated hard failure!\n");
+			dodelay(harderror[harderrorptr].failtime);
+			dosleep();
+			errno=EIO;
+			return -1;
+		} else if (isinlist(softerror,&softerrorptr,&softerrors,block1)) {
 				if (softerrorcount[softerrorptr]++<softfailcount) {
 					myprint(" simulated soft failure!\n");
+					dodelay(softerror[softerrorptr].failtime);
+					dosleep();
 					errno=EIO;
 					return -1;
 				} else {
 					if (softerrorcount[softerrorptr]>softfailcount+1) {
+						// this code currently gets never reached, its just an example
+						// of how inflicting permanent damage could be simulated
 						myprint(" simulated soft failure turned hard!\n");
+						dodelay(softerror[softerrorptr].failtime);
+						dosleep();
 						errno=EIO;
 						return -1;
 					}
+					dodelay(softerror[softerrorptr].goodtime);
 					myprint(" simulated soft recovery:");
 					softerrorcount[softerrorptr]-=2;
 				}
-		}
-		if (isinlist(harderror,&harderrorptr,&harderrors,block1)) {
-			delay(harderrordelay);
-			myprint(" simulated hard failure!\n");
-			errno=EIO;
-			return -1;
+		} else if (isinlist(slowsector,&slowsectorptr,&slowsectors,block1)) {
+			dodelay(slowsector[slowsectorptr].goodtime);
+		} else {
+			dodelay(0);
 		}
 		for (count1=block1+1;count1<=block2;count1++) {
 			if (isinlist(softerror,&softerrorptr,&softerrors,count1) && max>count1*blocksize) {
@@ -406,6 +488,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 		myprint(" reads ");
 		myprintint(result);
 		myprint(" bytes\n");
+		dosleep();
 		return result;
 	}
 	return realread(fd,buf,count);

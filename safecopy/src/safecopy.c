@@ -322,6 +322,7 @@ long int timediff(struct timeval oldtime,struct timeval newtime) {
 
 	long int usecs=newtime.tv_usec-oldtime.tv_usec;
 	usecs=usecs+((newtime.tv_sec-oldtime.tv_sec)*1000000);
+	if (usecs<0) usecs=0;
 	return usecs;
 
 }
