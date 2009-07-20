@@ -1378,7 +1378,7 @@ int main(int argc, char ** argv) {
 		gettimeofday(&newtime,NULL);
 		elapsed=timediff(oldtime,newtime);
 		if (timingfile) {
-			fprintf(timingfile,"%llu %lu\n",sposition/blocksize,elapsed);
+			fprintf(timingfile,"%010llu %lu %lli\n",sposition/blocksize,elapsed,block);
 		}
 
 // 6.e feedback - calculate and display user feedback information
