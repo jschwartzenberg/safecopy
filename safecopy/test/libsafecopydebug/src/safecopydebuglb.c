@@ -201,6 +201,7 @@ void readoptions() {
 	int t;
 	struct timedata x;
 	struct timespec tx;
+	long long unsigned int tmp;
 
 	softerrors=0;
 	harderrors=0;
@@ -229,6 +230,7 @@ void readoptions() {
 			x.sector=0;
 			x.goodtime=0;
 			x.failtime=0;
+			tmp=0;
 			if (strcmp(line,"verbose")==0) {
 				sscanf(number,"%u",&verbosity);
 				fprintf(stderr,"debugfile verbosity: %u\n",verbosity);
@@ -248,18 +250,21 @@ void readoptions() {
 				sscanf(number,"%lu",&slowsectordelay);
 				if (verbosity) fprintf(stderr,"debugfile delay on any sectors: %lu usec\n",slowsectordelay);
 			} else if (strcmp(line,"slow")==0) {
-				sscanf(number,"%llu %u",&x.sector,&x.goodtime);
+				sscanf(number,"%llu %u",&tmp,&x.goodtime);
+				x.sector=tmp;
 				addtolist(slowsector,&slowsectors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating read difficulty in block: %llu\n",x.sector);
+				if (verbosity) fprintf(stderr,"debugfile simulating read difficulty in block: %llu\n",tmp);
 			} else if (strcmp(line,"softfail")==0) {
-				sscanf(number,"%llu %u %u",&x.sector,&x.goodtime,&x.failtime);
+				sscanf(number,"%llu %u %u",&tmp,&x.goodtime,&x.failtime);
+				x.sector=tmp;
 				addtolist(softerror,&softerrors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating soft error in block: %llu\n",x.sector);
+				if (verbosity) fprintf(stderr,"debugfile simulating soft error in block: %llu\n",tmp);
 				softerrorcount[softerrors]=0;
 			} else if (strcmp(line,"hardfail")==0) {
-				sscanf(number,"%llu %u",&x.sector,&x.failtime);
+				sscanf(number,"%llu %u",&tmp,&x.failtime);
+				x.sector=tmp;
 				addtolist(harderror,&harderrors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating hard error in block: %llu\n",x.sector);
+				if (verbosity) fprintf(stderr,"debugfile simulating hard error in block: %llu\n",tmp);
 			}
 		}
 	}
