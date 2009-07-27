@@ -9,7 +9,7 @@
 #define _GNU_SOURCE
 #endif
 
-#define CONFIGFILE "safecopydebug.cfg"
+#define CONFIGFILE "simulator.cfg"
 #define MAXLIST 1000000
 
 #include <dlfcn.h>
@@ -55,9 +55,10 @@ struct timedata {
 
 static int mydesc=-1;
 static off_t current=0;
+static off_t oldcurrent=0;
 
 static struct timeval starttime,endtime;
-static unsigned long granularity, sleeptime;
+static unsigned long granularity, sleeptime, seeksleeptime;
 
 static struct timedata slowsector[MAXLIST];
 static struct timedata slowsector[MAXLIST];
@@ -65,6 +66,7 @@ static struct timedata softerror[MAXLIST];
 static int softerrorcount[MAXLIST];
 static struct timedata harderror[MAXLIST];
 static unsigned long slowsectordelay=0;
+static unsigned long sectorsleeptime=0;
 static int slowsectors=0;
 static int slowsectorptr=0;
 static int softerrors=0;
@@ -86,6 +88,7 @@ static inline long int timediff() {
 
 }
 
+
 static inline void delay(long microseconds) {
 	sleeptime=microseconds;
 }
@@ -103,6 +106,7 @@ static inline void dosleep() {
 	// we are evil and do busy waiting
 	static struct timespec x;
 	static unsigned long timed;
+	sleeptime=sleeptime+seeksleeptime;
 
 	gettimeofday(&endtime,NULL);
 	timed=timediff();
@@ -118,10 +122,19 @@ static inline void dosleep() {
 
 }
 
-void addtolist(struct timedata *array,int *count,struct timedata *value) {
+static inline void sectorsleep() {
+	// add to sleep time the time needed to seek to the current position
+	static long difference;
+	difference=oldcurrent-current;
+	oldcurrent=current;
+	if (difference<0) difference=-difference;
+	seeksleeptime=(difference*sectorsleeptime);
+}
+
+static void addtolist(struct timedata *array,int *count,struct timedata *value) {
 // insert value into sorted array of length *count
 	if (*count==MAXLIST) {
-		fprintf(stderr,"debugfile error: cannot store any more sectors in list - out of hardcoded memory limit!\n");
+		fprintf(stderr,"simulator error: cannot store any more sectors in list - out of hardcoded memory limit!\n");
 		return;
 	}
 	if (!*count) {
@@ -207,7 +220,7 @@ void readoptions() {
 	harderrors=0;
 	fd=fopen(CONFIGFILE,"r");
 	if (!fd) {
-		perror("debugfile could not open config file "CONFIGFILE);
+		perror("simulator could not open config file "CONFIGFILE);
 		return;
 	}
 	gettimeofday(&starttime,NULL);
@@ -219,7 +232,7 @@ void readoptions() {
 	gettimeofday(&endtime,NULL);
 	// granularity is set higher than it is by about 1/4
 	granularity=timediff()/7;
-	fprintf(stderr,"debugfile time granularity: %lu usecs\ndebugfile everything shorter will be busy-waiting\n",granularity);
+	fprintf(stderr,"simulator time granularity: %lu usecs\nsimulator everything shorter will be busy-waiting\n",granularity);
 
 	while (fgets(line,255,fd)) {
 		number=strchr(line,'=');
@@ -233,38 +246,41 @@ void readoptions() {
 			tmp=0;
 			if (strcmp(line,"verbose")==0) {
 				sscanf(number,"%u",&verbosity);
-				fprintf(stderr,"debugfile verbosity: %u\n",verbosity);
+				fprintf(stderr,"simulator verbosity: %u\n",verbosity);
 			} else if (strcmp(line,"blocksize")==0) {
 				sscanf(number,"%u",&blocksize);
-				if (verbosity) fprintf(stderr,"debugfile simulated blocksize: %u\n",blocksize);
+				if (verbosity) fprintf(stderr,"simulator simulated blocksize: %u\n",blocksize);
 			} else if (strcmp(line,"filesize")==0) {
 				sscanf(number,"%u",&filesize);
-				if (verbosity) fprintf(stderr,"debugfile simulated filesize: %u\n",filesize);
+				if (verbosity) fprintf(stderr,"simulator simulated filesize: %u\n",filesize);
 			} else if (strcmp(line,"source")==0) {
 				sscanf(number,"%s",filename);
-				if (verbosity) fprintf(stderr,"debugfile opening data source: %s\n",filename);
+				if (verbosity) fprintf(stderr,"simulator opening data source: %s\n",filename);
 			} else if (strcmp(line,"softfailcount")==0) {
 				sscanf(number,"%u",&softfailcount);
-				if (verbosity) fprintf(stderr,"debugfile simulated soft error count: %u\n",softfailcount);
+				if (verbosity) fprintf(stderr,"simulator simulated soft error count: %u\n",softfailcount);
+			} else if (strcmp(line,"seekdelay")==0) {
+				sscanf(number,"%lu",&sectorsleeptime);
+				if (verbosity) fprintf(stderr,"simulator time to seek over one sector: %lu usec\n",sectorsleeptime);
 			} else if (strcmp(line,"delay")==0) {
 				sscanf(number,"%lu",&slowsectordelay);
-				if (verbosity) fprintf(stderr,"debugfile delay on any sectors: %lu usec\n",slowsectordelay);
+				if (verbosity) fprintf(stderr,"simulator delay on any sectors: %lu usec\n",slowsectordelay);
 			} else if (strcmp(line,"slow")==0) {
 				sscanf(number,"%llu %u",&tmp,&x.goodtime);
 				x.sector=tmp;
 				addtolist(slowsector,&slowsectors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating read difficulty in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulator simulating read difficulty in block: %llu\n",tmp);
 			} else if (strcmp(line,"softfail")==0) {
 				sscanf(number,"%llu %u %u",&tmp,&x.goodtime,&x.failtime);
 				x.sector=tmp;
 				addtolist(softerror,&softerrors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating soft error in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulator simulating soft error in block: %llu\n",tmp);
 				softerrorcount[softerrors]=0;
 			} else if (strcmp(line,"hardfail")==0) {
 				sscanf(number,"%llu %u",&tmp,&x.failtime);
 				x.sector=tmp;
 				addtolist(harderror,&harderrors,&x);
-				if (verbosity) fprintf(stderr,"debugfile simulating hard error in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulator simulating hard error in block: %llu\n",tmp);
 			}
 		}
 	}
@@ -272,7 +288,8 @@ void readoptions() {
 
 
 static inline void myprint(char* text) {
-	size_t len=0;
+	static size_t len;
+	len=0;
 	if (!verbosity) return;
 	while ((char) *(text+len)) len++;
 	write(2,text,len);
@@ -328,7 +345,7 @@ void _init(void) {
 	realclose=dlsym(RTLD_NEXT,"close");
 	reallseek=dlsym(RTLD_NEXT,"lseek");
 	realread=dlsym(RTLD_NEXT,"read");
-	myprint("debugfile initialising - reading config "CONFIGFILE"\n");
+	myprint("simulator initialising - reading config "CONFIGFILE"\n");
 	readoptions();
 }
 
@@ -359,13 +376,13 @@ int open64(const char *pathname,int flags,...) {
 	}
 	if (strcmp(pathname,"debug")==0) {
 		if (mydesc!=-1) {
-			myprint("debugfile open - file already openend, can't open twice!\n");
+			myprint("simulator open - file already openend, can't open twice!\n");
 			errno=ETXTBSY;
 			return -1;
 		}
 		mydesc=realopen(filename,O_RDONLY);
 		if (mydesc==-1) {
-			perror("debugfile couldnt open source");
+			perror("simulator couldnt open source");
 		} else {
 			myprint("opening debug\n");
 		}
@@ -441,6 +458,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 				return 0;
 			}
 		}
+		sectorsleep();
 		block1=current/blocksize;
 		block2=(current+result)/blocksize;
 		if (isinlist(harderror,&harderrorptr,&harderrors,block1)) {
@@ -490,6 +508,8 @@ ssize_t read(int fd,void *buf,size_t count) {
 
 		result= realread(fd,buf,result);
 		current+=result;
+		// no sectorsleep in continuous read - thats already calculated in through statistics gathering
+		oldcurrent=current;
 		myprint(" reads ");
 		myprintint(result);
 		myprint(" bytes\n");
