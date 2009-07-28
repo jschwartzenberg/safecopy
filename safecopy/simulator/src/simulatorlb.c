@@ -107,6 +107,7 @@ static inline void dosleep() {
 	static struct timespec x;
 	static unsigned long timed;
 	sleeptime=sleeptime+seeksleeptime;
+	seeksleeptime=0;
 
 	gettimeofday(&endtime,NULL);
 	timed=timediff();
@@ -125,10 +126,10 @@ static inline void dosleep() {
 static inline void sectorsleep() {
 	// add to sleep time the time needed to seek to the current position
 	static long difference;
-	difference=oldcurrent-current;
+	difference=(oldcurrent-current)/blocksize;
 	oldcurrent=current;
 	if (difference<0) difference=-difference;
-	seeksleeptime=(difference*sectorsleeptime);
+	seeksleeptime=((difference*sectorsleeptime)/1000);
 }
 
 static void addtolist(struct timedata *array,int *count,struct timedata *value) {
@@ -261,7 +262,7 @@ void readoptions() {
 				if (verbosity) fprintf(stderr,"simulator simulated soft error count: %u\n",softfailcount);
 			} else if (strcmp(line,"seekdelay")==0) {
 				sscanf(number,"%lu",&sectorsleeptime);
-				if (verbosity) fprintf(stderr,"simulator time to seek over one sector: %lu usec\n",sectorsleeptime);
+				if (verbosity) fprintf(stderr,"simulator time to seek over 1000 sectors: %lu usec\n",sectorsleeptime);
 			} else if (strcmp(line,"delay")==0) {
 				sscanf(number,"%lu",&slowsectordelay);
 				if (verbosity) fprintf(stderr,"simulator delay on any sectors: %lu usec\n",slowsectordelay);
