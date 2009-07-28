@@ -584,25 +584,6 @@ recoverable sectors
  by the error cause.
 \end_layout
 
-\begin_layout Paragraph
-Note: This statistic diagram has been created with an older timing.log creation
- algorithm, not including a result code for sector read attempts.
- Therefore its listing some bogus 
-\emph on
-unsuccessful read attempts
-\emph default
- which had been 
-\emph on
-readable sectors
-\emph default
- just past the end of a bad area which have been read twice.
- Eventually this sheet needs to be re-created to distinguish this group
- from real recovered sectors.
-
-\emph on
- 
-\end_layout
-
 \begin_layout Subsubsection
 LiteOn CDRW drive
 \end_layout
