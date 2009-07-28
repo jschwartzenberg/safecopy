@@ -221,7 +221,7 @@ void usage(char * name) {
 	fprintf(stdout,"	              Blocks not in the -I file, or covered by the file\n");
 	fprintf(stdout,"	              specified with -X are save from being overwritten.\n");
 	fprintf(stdout,"	              Default: none\n");
-	fprintf(stdout,"	--debug <level> : Enable debug output. Level is a bitfield,\n");
+	fprintf(stdout,"	--debug <level> : Enable debug output. Level is a bit field,\n");
 	fprintf(stdout,"	                  add values together for more information:\n");
 	fprintf(stdout,"	                     program flow:     %i\n",DEBUG_FLOW);
 	fprintf(stdout,"	                     IO control:       %i\n",DEBUG_IO);
@@ -1051,7 +1051,7 @@ int main(int argc, char ** argv) {
 			if (incremental==1) fclose(bblocksin);
 			if (excluding==1) fclose(xblocksin);
 			if (bblocksout) close(bblocksout);
-			fprintf(stderr,"Error opening timing file for writing: %s",bblocksoutfile);
+			fprintf(stderr,"Error opening timingfile for writing: %s",bblocksoutfile);
 			perror(" ");
 			arglist_kill(carglist);
 			return 2;

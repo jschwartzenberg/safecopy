@@ -1,0 +1,1443 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+
+<!--Converted with LaTeX2HTML 2008 (1.71)
+original version by:  Nikos Drakos, CBLU, University of Leeds
+* revised and updated by:  Marcus Hennecke, Ross Moore, Herb Swan
+* with significant contributions from:
+  Jens Lippmann, Marek Rouchal, Martin Wilck and others -->
+<HTML>
+<HEAD>
+<TITLE>Statistical analysis of damaged data storage media read timings.</TITLE>
+<META NAME="description" CONTENT="Statistical analysis of damaged data storage media read timings.">
+<META NAME="keywords" CONTENT="analysis">
+<META NAME="resource-type" CONTENT="document">
+<META NAME="distribution" CONTENT="global">
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-15">
+<META NAME="Generator" CONTENT="LaTeX2HTML v2008">
+<META HTTP-EQUIV="Content-Style-Type" CONTENT="text/css">
+
+<LINK REL="STYLESHEET" HREF="analysis.css">
+
+</HEAD>
+
+<BODY >
+<!--Navigation Panel-->
+<IMG WIDTH="81" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="next_inactive"
+ SRC="file:/usr/lib/latex2html/icons/nx_grp_g.png"> 
+<IMG WIDTH="26" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="up"
+ SRC="file:/usr/lib/latex2html/icons/up_g.png"> 
+<IMG WIDTH="63" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="previous"
+ SRC="file:/usr/lib/latex2html/icons/prev_g.png">   
+<BR>
+<BR>
+<BR>
+<!--End of Navigation Panel-->
+
+<P>
+
+<P>
+
+<P>
+
+<P>
+<H1 ALIGN="CENTER">Statistical analysis of damaged data storage media read timings.</H1>
+<DIV>
+
+<P ALIGN="CENTER"><STRONG>Corvus Corax</STRONG></P>
+<P ALIGN="CENTER"><STRONG>2009-07-28</STRONG></P>
+</DIV>
+
+<H3>Abstract:</H3>
+<DIV>
+Data storage devices and drivers show characteristic behavior when
+operating on damaged media, especially concerning read timings. A
+read attempt on a damaged sector can take several magnitudes more
+time than a regular read attempt, which has implications on the performance
+of data recovery software. This article attempts to shed some light
+on the behavior of a couple of example hardware and its characteristics
+and tries to deduct consequences for the performance of recovery software
+and implied requirements for program behavior and development. The
+goal is to gather information for a ``simulated bad media'' environment
+which can be used to benchmark different data recovery tools under
+reproducible conditions which mimic real world bad media behavior. 
+
+<P>
+</DIV>
+<P>
+<BR>
+
+<H2><A NAME="SECTION00010000000000000000">
+Contents</A>
+</H2>
+<!--Table of Contents-->
+
+<UL>
+<LI><A NAME="tex2html53"
+  HREF="analysis.html#SECTION00020000000000000000">1 Statistical data generation</A>
+<UL>
+<LI><A NAME="tex2html54"
+  HREF="analysis.html#SECTION00021000000000000000">1.1 Options for data generation</A>
+<LI><A NAME="tex2html55"
+  HREF="analysis.html#SECTION00022000000000000000">1.2 Data preparation</A>
+<LI><A NAME="tex2html56"
+  HREF="analysis.html#SECTION00023000000000000000">1.3 Shortcomings</A>
+</UL>
+<BR>
+<LI><A NAME="tex2html57"
+  HREF="analysis.html#SECTION00030000000000000000">2 Examples of bad media</A>
+<UL>
+<LI><A NAME="tex2html58"
+  HREF="analysis.html#SECTION00031000000000000000">2.1 The KNOPPIX CD</A>
+<LI><A NAME="tex2html59"
+  HREF="analysis.html#SECTION00032000000000000000">2.2 5&#188;'' floppy</A>
+<LI><A NAME="tex2html60"
+  HREF="analysis.html#SECTION00033000000000000000">2.3 2&#189;'' IDE hard disk</A>
+</UL>
+<BR>
+<LI><A NAME="tex2html61"
+  HREF="analysis.html#SECTION00040000000000000000">3 Implications on the efficiency of data rescue</A>
+<UL>
+<LI><A NAME="tex2html62"
+  HREF="analysis.html#SECTION00041000000000000000">3.1 Implication on safecopy development</A>
+<LI><A NAME="tex2html63"
+  HREF="analysis.html#SECTION00042000000000000000">3.2 Implications on other tools</A>
+</UL>
+<BR>
+<LI><A NAME="tex2html64"
+  HREF="analysis.html#SECTION00050000000000000000">4 Benchmark creation</A>
+<UL>
+<LI><A NAME="tex2html65"
+  HREF="analysis.html#SECTION00051000000000000000">4.1 Approximated timing behavior.</A>
+<LI><A NAME="tex2html66"
+  HREF="analysis.html#SECTION00052000000000000000">4.2 Simulation requirements.</A>
+<LI><A NAME="tex2html67"
+  HREF="analysis.html#SECTION00053000000000000000">4.3 Shortcomings</A>
+</UL>
+<BR>
+<LI><A NAME="tex2html68"
+  HREF="analysis.html#SECTION00060000000000000000">5 Creation of test cases</A>
+<UL>
+<LI><A NAME="tex2html69"
+  HREF="analysis.html#SECTION00061000000000000000">5.1 CDROM example</A>
+<LI><A NAME="tex2html70"
+  HREF="analysis.html#SECTION00062000000000000000">5.2 Other CDROM drive</A>
+<LI><A NAME="tex2html71"
+  HREF="analysis.html#SECTION00063000000000000000">5.3 Floppy example</A>
+</UL>
+<BR>
+<LI><A NAME="tex2html72"
+  HREF="analysis.html#SECTION00070000000000000000">6 Conclusion</A>
+<UL>
+<LI><A NAME="tex2html73"
+  HREF="analysis.html#SECTION00071000000000000000">6.1 Seek time evaluation on KNOPPIX CD</A>
+</UL></UL>
+<!--End of Table of Contents-->
+
+<P>
+
+<H1><A NAME="SECTION00020000000000000000">
+1 Statistical data generation</A>
+</H1>
+
+<P>
+Statistical data is gathered using the tool <I>safecopy</I> (safecopy web page <TT><A NAME="tex2html1"
+  HREF="http://safecopy.sourceforge.net">http://safecopy.sourceforge.net</A></TT>)
+version 1.5. It provides the following features:
+
+<P>
+
+<UL>
+<LI>Attempt to read every sector of a storage medium.
+</LI>
+<LI>Generate and store timing information on each read attempt.
+</LI>
+<LI>Ability to identify different categories of sectors, as there are:
+
+<P>
+
+<UL>
+<LI><I>readable sectors</I>
+</LI>
+<LI><I>unreadable sectors</I>
+</LI>
+<LI>sectors that upon multiple read attempts sometimes succeed and sometimes
+fail. hence called<I> recoverable sectors</I>
+</LI>
+</UL>
+</LI>
+</UL>
+
+<P>
+
+<H2><A NAME="SECTION00021000000000000000">
+1.1 Options for data generation</A>
+</H2>
+
+<P>
+To produce significant statistical data, user definable options for
+safecopy are set as follows for all statistic gatherings:
+
+<P>
+<DL>
+<DT><STRONG>-sync</STRONG></DT>
+<DD>Safecopy will use synchronous or direct IO, bypassing
+kernel caching, reducing the imprint of kernel behavior on the read
+timing.
+</DD>
+<DT><STRONG>-L&nbsp;2</STRONG></DT>
+<DD>Safecopy will use low level IO where applicable, which
+in case of CDROM media bypasses kernel driver error correction and
+reads sectors in so called <I>raw mode</I> directly from the drive.
+</DD>
+<DT><STRONG>-Z&nbsp;0</STRONG></DT>
+<DD>This disables a feature of safecopy that forces head realignments
+after read errors occurred. Since head realignments induce delays
+for repositioning the drive head on the following read attempt, this
+would falsify acquired statistical data and needs to be disabled.
+</DD>
+<DT><STRONG>-R&nbsp;4</STRONG></DT>
+<DD>Safecopy will try to read at least the first sector of
+a found bad area 4 times before giving up and skipping to the next
+sector. This is necessary to successfully detect some <I>recoverable
+sectors</I> and provide timing data on them.
+</DD>
+<DT><STRONG>-f&nbsp;1*</STRONG></DT>
+<DD>Safecopy will try to read every single sector of the
+drive, even in a concurrent bad area. The default behavior would be
+to skip over bad areas and only check some sectors to find the end
+of the bad area fast. Since we want statistical data on the behavior
+of <I>unreadable sectors</I>, we attempt to read on every sector instead.
+</DD>
+<DT><STRONG>-b&nbsp;<SMALL>XXX</SMALL></STRONG></DT>
+<DD>The preferred blocksize reported by the Linux
+kernel is 1024 byte on x86 systems and 4096 byte on x86_64 systems.
+However most hardware sector sizes are 512 byte. Force setting this
+causes safecopy to explicitly read every sector individually which
+is what we want. However some hardware uses different sector sizes.
+CDROMs for example have a logical sector size of (usually) 2048 byte.
+</DD>
+<DT><STRONG>-T&nbsp;timing.log</STRONG></DT>
+<DD>Safecopy will store sector read timing statistics
+in this file.
+</DD>
+<DT><STRONG>-o&nbsp;badblocks.log</STRONG></DT>
+<DD>Safecopy will list <I>unrecoverable sectors</I>
+in this file.
+</DD>
+</DL>
+An example safecopy invocation to read from a CD drive on a Linux
+machine would be:
+
+<P>
+<BLOCKQUOTE>
+safecopy -sync -L 2 -Z 0 -R 4 -f 1* -T timing.log -o badblocks.log
+-b 2048 /dev/cdrom test.dat
+
+</BLOCKQUOTE>
+
+<P>
+
+<H2><A NAME="SECTION00022000000000000000">
+1.2 Data preparation</A>
+</H2>
+
+<P>
+The relevant output of safecopy is stored in two files:
+
+<P>
+<DL>
+<DT><STRONG>timings.log</STRONG></DT>
+<DD>Holds sector numbers and read times in &#181;-seconds.
+</DD>
+<DT><STRONG>badblocks.log</STRONG></DT>
+<DD>Holds a list of <I>unrecoverable sectors</I>.
+</DD>
+</DL>
+To visualize this data meaningfully, the read timings need to be split
+into read times for the relevant groups.
+
+<P>
+<DL>
+<DT><STRONG>unrecoverable&nbsp;sectors</STRONG></DT>
+<DD>are easy to extract, since their sector
+numbers are listed in badblocks.log.
+</DD>
+<DT><STRONG>readable&nbsp;sectors</STRONG></DT>
+<DD>are identifiable since they are not listed
+in <I>badblocks.log</I>, and listed in <I>timing.log</I> exactly once.
+</DD>
+<DT><STRONG>recoverable&nbsp;sectors</STRONG></DT>
+<DD>are identifiable since they are not listed
+in <I>badblocks.log</I>, but listed in timing.log multiple times,
+since safecopy attempted to read them more than once. This group can
+be split further into:
+
+<P>
+<DL>
+<DT><STRONG>unsuccessful&nbsp;read&nbsp;attempts</STRONG></DT>
+<DD>on recoverable sectors, which are
+all entries with a result code of -1.
+</DD>
+<DT><STRONG>successful&nbsp;read&nbsp;attempts</STRONG></DT>
+<DD>on recoverable sectors, which are
+entries with a positive result code.
+</DD>
+</DL>
+</DD>
+</DL>
+Sector numbers and timings for all of these groups are generated by
+standard text file processing tools and stored in separate files.
+
+<P>
+These files can then be read by a graphical visualization tool like
+<I>gnu-plot</I>.
+
+<P>
+
+<H2><A NAME="SECTION00023000000000000000">
+1.3 Shortcomings</A>
+</H2>
+
+<P>
+Safecopy only tries to repeatedly read the first sector of any set
+of adjacent sectors that cause read errors. As such, it can not distinguish
+between <I>recoverable sectors</I> and <I>unrecoverable sectors</I>
+within or at the end of such a set. Also the amount of read attempts
+is limited to a finite amount, which implies to possibility of missed
+<I>recoverable sectors</I>, just because they did not recover during
+the attempted read calls. Therefore it must be assumed that some of
+the sectors listed as unrecoverable are hidden <I>recoverable sectors</I>.
+
+<P>
+On the other hand some of the sectors identified as <I>readable
+sectors</I> could be hidden <I>recoverable sectors</I> that happened
+to be successfully read on first attempt. Then again every sector
+has the potential to eventually fail.
+
+<P>
+This has implications when using the gathered data as a template for
+simulated bad media, as discussed below.
+
+<P>
+
+<H1><A NAME="SECTION00030000000000000000">
+2 Examples of bad media</A>
+</H1>
+
+<P>
+To provide data on real world behavior, statistic data has been gathered
+on real damaged media under several different conditions.
+
+<P>
+
+<H2><A NAME="SECTION00031000000000000000">
+2.1 The KNOPPIX CD</A>
+</H2>
+
+<P>
+CDROMs are prime suspects for data recovery statistics since they
+are very common medias, easily damaged, and common damages to them
+like scratches are easily reproducible. The particular CD used for
+data generation is worn from heavy use and additionally had purposely
+made deep scratches on both the front and backside of the self burned
+CD, producing both permanently damaged sectors and sectors on which
+a drive with good error correction has a chance of recovery. This
+CD is read in two different drives.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="78"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 1:</STRONG>
+CDROM top.</CAPTION>
+<TR><TD><IMG
+ WIDTH="234" HEIGHT="226" ALIGN="BOTTOM" BORDER="0"
+ SRC="img1.png"
+ ALT="\includegraphics[height=5cm]{0_home_raven_src_safecopy_simulator_doc_images_knoppix-front.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="82"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 2:</STRONG>
+CDROM bottom.</CAPTION>
+<TR><TD><IMG
+ WIDTH="238" HEIGHT="226" ALIGN="BOTTOM" BORDER="0"
+ SRC="img2.png"
+ ALT="\includegraphics[height=5cm]{1_home_raven_src_safecopy_simulator_doc_images_knoppix-back.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Physical sector size of this medium is 2352 bytes, with 2048 bytes
+user data and 304 bytes error correction and sector address coded.
+Safecopy can address it in RAW mode, reading the 2352 byte sectors
+directly, but stores only 2048 byte user data in the destination file.
+Overall disk size (user data) is 730040320 byte (696 MB).
+
+<P>
+An interesting effect on data recovery is, while the area with missing
+reflective layer around sector #100000 is just about 4 millimeters
+in diameter, the affected count of unreadable sectors is often up
+to 12 sectors, which is more than half a track, sometimes leaving
+only a few sectors readable on that track.
+
+<P>
+The likely cause of this behavior, which occur ed on all tested CD-drives,
+is that the laser optic looses its focus where the reflective layer
+is missing, and needs some time to refocus on the CD surface. Since
+the CD is constantly spinning, sectors that ``spun through'' during
+refocusing time cannot be read. The focus loss appears on every turn
+in that area, reproducing the ``after scratch out of focus effect''
+so to speak. Workarounds for that could be to force an extremely low
+spinning speed, but since that cannot be easily set in software, it
+requires a firmware patch or special hardware meant for data rescue.
+
+<P>
+Re-establishing the reflective features of the CD back surface could
+possibly reduce the out of focus effect, even if they cannot make
+the directly affected data readable it would make the directly following
+data on the same track re-accessible. 
+
+<P>
+
+<H3><A NAME="SECTION00031100000000000000">
+2.1.1 Dell laptop DVD drive</A>
+</H3>
+
+<P>
+The mentioned CD is read in a Dell Inspiron 8200 inbuilt DVD-ROM drive,
+identifying itself as 
+
+<P>
+<BLOCKQUOTE>
+HL-DT-STDVD-ROM GDR8081N, ATAPI CD/DVD-ROM drive
+<BR>
+ATAPI 24X DVD-ROM drive, 512kb Cache, DMA
+
+</BLOCKQUOTE>
+This drive is handling scratches on the front-side of the media badly,
+unable to recover most of the affected sectors. Interesting to see
+is the relative difference in absolute reading speed as the drive
+automatically adjusts its spin speed when it encounters problems.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="91"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 3:</STRONG>
+Sector read timings.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img3.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{2_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_stats1.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+As one can see, read attempts on <I>unrecoverable sectors</I> are
+all slower by about 3 orders of magnitude. Reading from the area where
+the reflective layer has been damaged is even slower, leading to recovery
+times up to 10 seconds per block.
+
+<P>
+<I>Unrecoverable sectors</I> are heavily mixed with <I>readable
+sectors</I> and <I>recoverable sectors</I> in bad areas, usually with
+both types on the same track, only a small number of sectors apart,
+but spanning over a noticeable span of tracks affected by the error
+cause.
+
+<P>
+
+<H4><A NAME="SECTION00031110000000000000">
+2.1.1.1 Note: This statistic diagram has been created with an older timing.log
+creation algorithm, not including a result code for sector read attempts.
+Therefore its listing some bogus <I>unsuccessful read attempts</I>
+which had been <I>readable sectors</I> just past the end of a bad
+area which have been read twice. Eventually this sheet needs to be
+re-created to distinguish this group from real recovered sectors.</A>
+</H4>
+
+<P>
+
+<H3><A NAME="SECTION00031200000000000000">
+2.1.2 LiteOn CDRW drive</A>
+</H3>
+
+<P>
+The same CD is read in a 
+
+<P>
+<BLOCKQUOTE>
+LITE-ON LTR-32123S, ATAPI CD/DVD-ROM drive
+<BR>
+ATAPI 40X CD-ROM CD-R/RW drive, 1984kB Cache
+
+</BLOCKQUOTE>
+This drive performs significantly better in terms of reading from
+problematic media. It has read most of the data covered by scratches
+on the underside of the CD. Its hard to belief this was the same source
+medium.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="105"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 4:</STRONG>
+Sector read timings.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img4.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{3_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-lighton_stats1.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Here, too, <I>unrecoverable sectors</I> are heavily mixed with <I>readable
+sectors</I> and <I>recoverable sectors</I> in the bad area, as described
+above due to the laser refocusing issue.
+
+<P>
+
+<H3><A NAME="SECTION00031300000000000000">
+2.1.3 Samsung DVD-ROM</A>
+</H3>
+
+<P>
+<BLOCKQUOTE>
+SAMSUNG DVD-ROM SD-608, ATAPI CD/DVD-ROM drive
+<BR>
+ATAPI 32X DVD-ROM drive, 512kB Cache
+
+</BLOCKQUOTE>
+This particular drive has not been used for statistics collection,
+it is just mentioned for reference. Any occurred unreadable sector
+caused a firmware crash, leading to a 60 second timeout during which
+the drive would not respond, followed by an ATAPI bus reset and a
+drive reset, automatically issued by the kernel, rebooting of the
+drive firmware. Reading an entire damaged CD on this drive would simply
+have taken far too long.
+
+<P>
+
+<H2><A NAME="SECTION00032000000000000000">
+2.2 5&#188;'' floppy</A>
+</H2>
+
+<P>
+While hopelessly outdated, any old floppy disks still around are by
+now bound to have at least some unreadable sectors due to loss of
+magnetization, dust, long term effect of background radioactivity,
+etc. Therefore its likely that any important data needing to be recovered
+from such a disk will be subject to data recovery tools.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="302"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 5:</STRONG>
+5&#188;'' floppy disk.</CAPTION>
+<TR><TD><IMG
+ WIDTH="234" HEIGHT="226" ALIGN="BOTTOM" BORDER="0"
+ SRC="img5.png"
+ ALT="\includegraphics[height=5cm]{4_home_raven_src_safecopy_simulator_doc_images_old-floppy.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Sector size of this medium is 512 byte, stored in IBM AT 1.2 MB 80
+track low level format. Safecopy reads this medium through the Linux
+kernel driver from a standard (though old and dusty) 5&#188;''
+floppy drive using O_DIRECT for reading from /dev/fd1, seeing only
+the 512 byte user data per block. This particular disk has 3 unreadable
+sectors on tracks 0 and 1 for unknown reasons (probably loss of magnetization).
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="121"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 6:</STRONG>
+Timing behavior of this disk.</CAPTION>
+<TR><TD><IMG
+ WIDTH="458" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img6.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{5_home_raven_src_safecopy_simulator_doc_eps_floppy_stats1.eps}">
+
+<P>
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+A significant feature of these drives is the high head positioning
+time, resulting in high read times for the first sector of each track.
+This delay is is in the same order of magnitude as the delay imposed
+by read errors. However the exact timings for sectors in the different
+groups are all significantly distinct.
+
+<P>
+Bad sectors are more than 4 orders of magnitudes slower to respond
+than good ones.
+
+<P>
+A feature of this particular disk is the low amount of <I>unrecoverable
+sectors</I>. Never the less, the existing bad sectors occur physically
+and logically close to each other, grouped in a <I>bad area</I>.
+
+<P>
+
+<H2><A NAME="SECTION00033000000000000000">
+2.3 2&#189;'' IDE hard disk</A>
+</H2>
+
+<P>
+SATA and PATA hard disks of different capacity are among the most
+common hard disks found, and as such often subject to data recovery.
+According to Murphy's law the probability of fatal hard disk failure
+increases exponentially with the time since the last backup. Recovery
+performance on these disks is heavily influenced by intelligent drive
+firmware, sometimes even for the better.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="128"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 7:</STRONG>
+IDE disk drive.</CAPTION>
+<TR><TD><IMG
+ WIDTH="302" HEIGHT="226" ALIGN="BOTTOM" BORDER="0"
+ SRC="img7.png"
+ ALT="\includegraphics[height=5cm]{6_home_raven_src_safecopy_simulator_doc_images_harddisk.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+This is a 6007357440 byte (6 so called GB) IDE drive with a logical
+sector size of 512 byte, identifying as:
+
+<P>
+<BLOCKQUOTE>
+TOSHIBA MK6015MAP, ATA DISK drive
+<BR>
+Model=TOSHIBA MK6015MAP, FwRev=U8.12 A, Serial No=51K92837T
+
+</BLOCKQUOTE>
+This drive had been removed from a laptop after sector read errors
+occurred.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="134"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 8:</STRONG>
+Sector read timings.</CAPTION>
+<TR><TD><IMG
+ WIDTH="476" HEIGHT="333" ALIGN="BOTTOM" BORDER="0"
+ SRC="img8.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{7_home_raven_src_safecopy_simulator_doc_eps_hdd_stats1.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+As one can see, similar to the behavior of CD-ROMS, the drive firmware
+reduces the absolute drive speed after it encounters errors. However
+the drive does not spin up again until a subsequent power down. On
+hard disks, the difference in read timings between successfully read
+data and errors is extreme, ranging over 5 orders of magnitude! (100
+SEC versus 10 seconds per sector)
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="138"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 9:</STRONG>
+A closeup of the bad area.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img9.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{8_home_raven_src_safecopy_simulator_doc_eps_hdd_stats2.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<H4><A NAME="SECTION00033010000000000000">
+2.3.0.1 Note: No recoverable sectors have been found on this particular drive.
+However earlier field tests of safecopy on damaged IDE drives encountered
+several cases where sectors could be recovered. Unfortunately no timing
+data is available on those.</A>
+</H4>
+
+<P>
+
+<H1><A NAME="SECTION00040000000000000000">
+3 Implications on the efficiency of data rescue</A>
+</H1>
+
+<P>
+The examined data confirmed the assumption that accessing <I>unrecoverable
+sectors</I> or even <I>recoverable sectors</I> is exceedingly slow to
+accessing <I>readable sectors</I>. It also shows a typical distribution
+of unrecoverable sectors, which are clustered in <I>bad areas</I>,
+caused by a shared error cause (for example a scratch, or a head crash).
+This bad areas can span from a few tracks up to a significant part
+of the storage medium, depending again on the error cause and severity.
+
+<P>
+It needs to be kept in mind that on some media (for example a HDD
+with a head crash) accessing <I>unrecoverable sectors</I>, or even
+<I>bad areas</I> can potentially further damage the drive, rendering
+more sectors unreadable and increasing data loss.
+
+<P>
+Therefore, when recovering data from a bad medium, accessing <I>unrecoverable
+sectors</I> should be avoided completely and accessing <I>recoverable
+sectors</I> should be minimized and take place at the end of a recovery
+process. Accessing data outside of <I>bad areas</I> should take place
+at the beginning.
+
+<P>
+Within a <I>bad area</I> itself there are two likely sector distributions:
+
+<P>
+
+<OL>
+<LI>All sectors in the bad area are <I>unrecoverable sectors</I>, optionally
+with some <I>recoverable sectors</I> at the rim.
+</LI>
+<LI>Parts of the affected tracks are readable, resulting in an approximately
+periodic oscillation of <I>readable sectors</I> and <I>unrecoverable
+sectors</I> optionally with some <I>recoverable sectors</I> at the borderline.
+All of the analyzed media for this article showed this type of distribution.
+</LI>
+</OL>
+The first, straightforward error distribution can be dealt with efficiently
+by establishing its begin and end sector with a small amount of read
+attempts and reading the rest of the disk, by algorithms current data
+rescue tools (safecopy, ddrescue, etc) already apply.
+
+<P>
+For the second (and apparently more common) distribution however,
+a satisfying solution is difficult to find. Even finding the end of
+the <I>bad area</I> with few read attempts is tricky, since there
+is a chance that such a read attempt matches a <I>readable sector</I>
+within the <I>bad area</I>, suggesting a premature end of the <I>bad
+area</I>. This could be coped with heuristic approaches, for example
+by analyzing the periodicity of the disk and guessing the likeliness
+of an <I>unreadable sector</I> based on its track position modulo
+relative to the first encountered bad sector. For this however the
+disk geometry must be known, since sector counts per track vary from
+disk to disk and sometimes even from track to track. In such a case
+the likeliness of guessing correctly would be increasingly low the
+further a guessed sector is apart from the reference sector.
+
+<P>
+The other problem with the second distribution is potentially recoverable
+data within a <I>bad area</I>. Especially on hard disks with multiple
+physical disks inside, the amount of data on a singly cylinder (spanning
+all disk surfaces) and as such between two sets of <I>unrecoverable
+sectors</I> can be significantly high, and potentially span entire files
+that need to be recovered.
+
+<P>
+It is thinkable that a heuristic approach could rescue some of this
+data fast, if making use of the periodicity and the Gaussian-like
+guessable size of the bad spot within each track, avoiding those areas.
+However this still won't rescue readable and recoverable sectors closer
+to the unrecoverable sectors on the same track, requiring a more thorough
+access later.
+
+<P>
+
+<H2><A NAME="SECTION00041000000000000000">
+3.1 Implication on safecopy development</A>
+</H2>
+
+<P>
+The bad area skipping algorithm of safecopy currently works quite
+efficiently at avoiding <I>unrecoverable sectors</I> within a <I>set
+of unrecoverable sectors</I> on a single track. However skipping over
+entire <I>bad areas</I> in a first rescue attempt is done via a relatively
+dump approach (-stage 1 skips 10% of the disk regardless of the
+size of the erroneous area). As mentioned above, finding the end of
+an oscillating <I>bad area</I> efficiently is a non trivial process
+if the disk geometry is not known. A heuristic algorithm that efficiently
+determines those could therefore increase the data rescue effectiveness
+of safecopy.
+
+<P>
+The same is true for rescuing within a <I>bad area</I>. A probabilistic
+approach could proactively avoid accessing sectors if they have a
+high likeliness of being unreadable, and treat them like <I>unreadable
+sectors</I>, to be accessed in a later safecopy run.
+
+<P>
+For both of these the periodicity of errors needs to be learned on
+the fly for each particular medium. Since safecopy can distinguish
+some hardware by means of its low level driver, for some media a assumed
+geometry can be provided by the low level back end.
+
+<P>
+The best implementation would probably be an optionally activatable
+heuristic module, which would dynamically adjust seek resolution and
+failure skip size, and proactively assume sectors to be bad based
+on probabilism. Since the geometry is subject to change, the probabilism
+should decrease with the ``distance'' to the last occurred ``real''
+error.
+
+<P>
+
+<H2><A NAME="SECTION00042000000000000000">
+3.2 Implications on other tools</A>
+</H2>
+
+<P>
+After creating a benchmark to create reproducible test result of the
+behavior of a recovery tool under realistic conditions, this can be
+used to benchmark other tools to show their strengths and shortcomings
+in comparison, and lead to conclusions on the effectiveness of different
+approaches.
+
+<P>
+
+<H1><A NAME="SECTION00050000000000000000">
+4 Benchmark creation</A>
+</H1>
+
+<P>
+A benchmark for data recovery should mimic the behavior of a set of
+representative test cases of real bad media. For the creation of this
+benchmark suite both the qualitative effect of a sector read attempt
+and the time consumption of such should be realistic.
+
+<P>
+A good starting point for such a benchmark is the debug test library
+coming with safecopy, since it sets up a test environment transparently
+for a to be tested program unaware of this virtual environment. The
+test library of safecopy 1.4 already provides the ability to produce
+simulated recoverable and unrecoverable sectors, so all it needs in
+addition to this is the ability to simulate timing behavior, and a
+reference set of to be simulated realistic test media behavior.
+
+<P>
+
+<H2><A NAME="SECTION00051000000000000000">
+4.1 Approximated timing behavior.</A>
+</H2>
+
+<P>
+As the analysis of the timing statistics of real media above suggests,
+the timing behavior of tested media can be approximated with a simplifying
+timing behavior, as long as the spanning of read timing over orders
+of magnitude is kept in a way it would still mimic the characteristic
+of real media. Non exponential variations on the other side can probably
+be ignored since they are subject to uncontrollable dynamic causes
+(CPU and IO load caused by other processes, etc). That leads to the
+following observations.
+
+<P>
+
+<UL>
+<LI>The majority of <I>readable sectors</I> are read within a certain
+constant time frame<IMG
+ WIDTH="56" HEIGHT="30" ALIGN="MIDDLE" BORDER="0"
+ SRC="img10.png"
+ ALT="$T1\pm E$">.
+</LI>
+<LI>Reading from a limited amount of <I>readable sectors</I> s takes longer
+than <IMG
+ WIDTH="56" HEIGHT="30" ALIGN="MIDDLE" BORDER="0"
+ SRC="img10.png"
+ ALT="$T1\pm E$"> by approximately factor <IMG
+ WIDTH="29" HEIGHT="16" ALIGN="BOTTOM" BORDER="0"
+ SRC="img11.png"
+ ALT="$2^{X_{s}}$">.
+</LI>
+<LI>Attempting to read from an <I>unrecoverable sectors</I> b takes time
+<!-- MATH
+ $(T1\pm E)*2^{X_{b}}$
+ -->
+<IMG
+ WIDTH="108" HEIGHT="35" ALIGN="MIDDLE" BORDER="0"
+ SRC="img12.png"
+ ALT="$(T1\pm E)*2^{X_{b}}$">, which is usually several orders of magnitude
+bigger than T1.
+</LI>
+<LI>Reading from <I>recoverable sectors</I> either fails, in which case
+the read attempt takes about as long to respond as an <I>unrecoverable
+sector</I>, or it succeeds within the time bounds of a <I>readable
+sector</I>.
+</LI>
+</UL>
+Therefore a <I>simplified media timing characteristics</I> specification
+can be given for any media by specifying the following:
+
+<P>
+
+<UL>
+<LI>A base time T1 used for the majority of <I>readable sectors</I>.
+</LI>
+<LI>A sector timing exponent <!-- MATH
+ $x_{s}\in\{Xs\}$
+ -->
+<IMG
+ WIDTH="77" HEIGHT="32" ALIGN="MIDDLE" BORDER="0"
+ SRC="img13.png"
+ ALT="$x_{s}\in\{Xs\}$"> for each <I>readable
+sector</I> s that takes significantly long to read from.
+</LI>
+<LI>A sector timing exponent <!-- MATH
+ $x_{b}\in\{Xb\}$
+ -->
+<IMG
+ WIDTH="76" HEIGHT="32" ALIGN="MIDDLE" BORDER="0"
+ SRC="img14.png"
+ ALT="$x_{b}\in\{Xb\}$"> for each <I>unrecoverable
+sector</I> b.
+</LI>
+<LI>Two sector timing exponents <!-- MATH
+ $x_{r}\in\{Xr\}$
+ -->
+<IMG
+ WIDTH="78" HEIGHT="32" ALIGN="MIDDLE" BORDER="0"
+ SRC="img15.png"
+ ALT="$x_{r}\in\{Xr\}$"> and <!-- MATH
+ $Y_{r}\in\{Yr\}$
+ -->
+<IMG
+ WIDTH="76" HEIGHT="32" ALIGN="MIDDLE" BORDER="0"
+ SRC="img16.png"
+ ALT="$Y_{r}\in\{Yr\}$">
+for each recoverable sector r, storing the reading time in both the
+readable and unreadable case.
+</LI>
+</UL>
+
+<P>
+
+<H2><A NAME="SECTION00052000000000000000">
+4.2 Simulation requirements.</A>
+</H2>
+
+<P>
+A benchmark tool that wants to simulate a damaged medium according
+to the <I>simplified media timing characteristics</I> deducted above
+must simulate the following:
+
+<P>
+
+<UL>
+<LI><I>readable sectors</I> that respond in time T1.
+</LI>
+<LI>a limited defined set of <I>readable sectors</I> that respond in time
+<IMG
+ WIDTH="64" HEIGHT="16" ALIGN="BOTTOM" BORDER="0"
+ SRC="img17.png"
+ ALT="$T1*2^{X_{s}}$">.
+</LI>
+<LI>a limited defined set of unrecoverable sectors that respond with failure
+in time <IMG
+ WIDTH="64" HEIGHT="16" ALIGN="BOTTOM" BORDER="0"
+ SRC="img18.png"
+ ALT="$T1*2^{X_{b}}$">,
+</LI>
+<LI>a limited defined set of recoverable sectors r that respond either
+
+<P>
+
+<UL>
+<LI>with failure in time <IMG
+ WIDTH="64" HEIGHT="16" ALIGN="BOTTOM" BORDER="0"
+ SRC="img19.png"
+ ALT="$T1*2^{X_{r}}$"> or
+</LI>
+<LI>with success in time <IMG
+ WIDTH="61" HEIGHT="16" ALIGN="BOTTOM" BORDER="0"
+ SRC="img20.png"
+ ALT="$T1*2^{Y_{r}}$">.
+</LI>
+</UL>
+</LI>
+</UL>
+Where T1, {Xs}, {Xb}, {Xr}, {Yr} and the sectors in each set
+are the <I>simplified media timing characteristics</I> of the test
+medium.
+
+<P>
+These requirements are met by the modified test debug library as shipped
+with safecopy-1.5.
+
+<P>
+
+<H2><A NAME="SECTION00053000000000000000">
+4.3 Shortcomings</A>
+</H2>
+
+<P>
+Some characteristic behavior of media can not be described by the
+<I>simplified media timing characteristics</I>. This model simulates
+sector read times for each sector individually. On real world media
+however, the read time also depends on the state of the drive.
+
+<P>
+One important feature not modelled is the seek time a drive needs
+to address a certain sector. Instead, as can be seen on the floppy
+disk data, these times are simulated as a feature of a single sector
+(for example the first sector of a track). However this doesn't apply
+to real world media, as this delay depends on the sequence and order
+of sectors being read. For example reading a media backwards would
+induce this delay on the last sector of a track instead.
+
+<P>
+A possible workaround would be to measure seeking times on a device
+and include them into the simulation. However the seek time is a complex
+function depending on both head position, turning speed, turning position
+and several other drive dependant parameters, which can not easily
+be measured in the generic case. A linear delay function depending
+on the block address distance of current position and seeking destination
+could probably create better simulation results if the reading software
+does a lot of seeking, however the accuracy of simulation would still
+be lacking.
+
+<P>
+
+<H1><A NAME="SECTION00060000000000000000">
+5 Creation of test cases</A>
+</H1>
+
+<P>
+To create and demonstrate a benchmark test case, the statistical data
+of a real media test must be analyzed and the parameters of the <I>simplified
+media timing characteristics</I> need to be determined. This test case
+should then be validated by comparing the statistics generated on
+the test case to the base data set of the real media and confirm that
+the test case behaves ``reasonably similar'' to the original.
+``Reasonably similar'' hereby means, closer to each other than
+to the typical damaged media that is not the reference source, while
+also making recovery tools behave similarly, when comparing success
+rate and time consumption.
+
+<P>
+
+<H2><A NAME="SECTION00061000000000000000">
+5.1 CDROM example</A>
+</H2>
+
+<P>
+Data source for this example is the above mentioned KNOPPIX CD read
+on the Dell.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="220"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 10:</STRONG>
+Original read timings.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img21.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{9_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_stats2.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Calculating the exponent multiplicands based on T1 leads to the following
+<I>simplified media timing characteristics</I>:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="310"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 11:</STRONG>
+<I>Simplified media characteristics</I>.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img22.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{10_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_smc.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Simulating this disk, using the safecopy test debug library, measuring
+sector read timings with safecopy-1.5, the following sector read timing
+statistics were gathered:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="229"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 12:</STRONG>
+The simulation result.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img23.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{11_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_simulation.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+As expected, there are random derivations of actual sector read timings
+from the simulated times, but they stay within the estimated error
+band E where <!-- MATH
+ $t=(T1\pm E)*2^{X_{s}}$
+ -->
+<IMG
+ WIDTH="135" HEIGHT="35" ALIGN="MIDDLE" BORDER="0"
+ SRC="img24.png"
+ ALT="$t=(T1\pm E)*2^{X_{s}}$">. Therefore the simplification
+of the simulation results would reproduce the original <I>simplified
+media characteristics</I> given by T1,{Xs},{Xb},{Xr},{Yr}.
+
+<P>
+During simulation, the same sectors were recovered as in the original
+safecopy run on the real disk and read attempts were undertaken on
+the same sectors. Intuitively the above requirements of ``reasonable
+similarity'' seem to be met. To give this claim foundation it is
+necessary to calculate the accumulated performance difference between
+original run and simulation based on the gathered statistics:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="236"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 13:</STRONG>
+The error between reading the media and the simulation.</CAPTION>
+<TR><TD><IMG
+ WIDTH="445" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img25.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{12_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_error.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+The simulation by <I>simplified media characteristics</I> caps the
+reading time error at 200% for each single sector, while
+the overall reading time for the whole disk is determined by the reading
+time error accumulated through the most dominant sectors. In the case
+of this CD, those clearly are damaged sectors.
+
+<P>
+The similarity between the two curves for overall reading time is
+clearly visible in this diagram.
+
+<P>
+
+<H2><A NAME="SECTION00062000000000000000">
+5.2 Other CDROM drive</A>
+</H2>
+
+<P>
+The same CD in a LightOn drive:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="243"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 14:</STRONG>
+Original.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img26.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{13_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-lighton_stats2.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="312"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 15:</STRONG>
+<I>Simplified media timing characteristics</I>.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img27.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{14_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-lighton_smc.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="251"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 16:</STRONG>
+Simulation.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img28.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{15_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-lighton_simulation.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="255"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 17:</STRONG>
+The error between reading the media and the simulation.</CAPTION>
+<TR><TD><IMG
+ WIDTH="445" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img29.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{16_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-lighton_error.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<H2><A NAME="SECTION00063000000000000000">
+5.3 Floppy example</A>
+</H2>
+
+<P>
+Data source is the above analyzed 5&#188;'' floppy disk.
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="261"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 18:</STRONG>
+Read timings on the original disk.</CAPTION>
+<TR><TD><IMG
+ WIDTH="458" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img30.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{17_home_raven_src_safecopy_simulator_doc_eps_floppy_stats2.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="313"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 19:</STRONG>
+<I>Simplified media timing characteristics.</I></CAPTION>
+<TR><TD><IMG
+ WIDTH="458" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img31.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{18_home_raven_src_safecopy_simulator_doc_eps_floppy_smc.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="269"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 20:</STRONG>
+Simulation.</CAPTION>
+<TR><TD><IMG
+ WIDTH="458" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img31.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{18_home_raven_src_safecopy_simulator_doc_eps_floppy_smc.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="273"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 21:</STRONG>
+The error between reading the media and the simulation.</CAPTION>
+<TR><TD><IMG
+ WIDTH="445" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img32.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{19_home_raven_src_safecopy_simulator_doc_eps_floppy_error.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+Most of the simulated <I>readable sectors</I> take a bit too long
+to read. However the overall simulation is too short by about 20%,
+since the significantly long read times of the dominant first sector
+of each track (originally caused by head seeking) are simulated about
+that percentage too fast. This errors are within the expected error
+margin of the <I>simplified media characteristics</I>.
+
+<P>
+
+<H1><A NAME="SECTION00070000000000000000">
+6 Conclusion</A>
+</H1>
+
+<P>
+It seems to be possible to undertake a reasonably accurate simulation
+of the behavior of damaged media and use this for benchmarking recovery
+tools based on <I>simplified media characteristics</I>.
+
+<P>
+The most important aspect not covered is, that a benchmark simulation
+would need to simulate the time consumption of seeking. Otherwise
+data recovery tools that do a lot of seeking on the source media had
+the potential to behave significantly better on the benchmark than
+on real damaged media. However a linear delay, based on sector address
+difference should be sufficient to penalize excessive seeking, even
+if it does not simulate real world seek times accurately in all cases.
+
+<P>
+Special consideration needs to be taken about media where seeking
+times are high compared to read times of damaged sectors even during
+a linear read, like the seen 5&#188;'' floppy disk. If
+the seek time is simulated by the above separate algorithm, significant
+delays inflicted on single sectors by seeking during statistics gathering
+of the source must be compensated by taking those sectors out of the
+{Xs} set.
+
+<P>
+Luckily most media types have insignificant seek times when reading
+linearly, so no compensation needs to be done.
+
+<P>
+To estimate the seek time, we compare the sector read times of two
+readable sectors that are physically far apart and are not in {Xs}
+(meaning their read time when reading linearly is within <!-- MATH
+ $t=(T1\pm E)*2^{0}=T1\pm E$
+ -->
+<IMG
+ WIDTH="198" HEIGHT="34" ALIGN="MIDDLE" BORDER="0"
+ SRC="img33.png"
+ ALT="$t=(T1\pm E)*2^{0}=T1\pm E$">
+) when read directly after each other. The seek time to seek a distance
+of one sector would then be calculated as <!-- MATH
+ $t_{seek}=\frac{t_{2}-T1}{n}$
+ -->
+<IMG
+ WIDTH="97" HEIGHT="38" ALIGN="MIDDLE" BORDER="0"
+ SRC="img34.png"
+ ALT="$t_{seek}=\frac{t_{2}-T1}{n}$">
+where t2 is the read time of the second sector and n is the numbers
+of sectors the two sectors are apart.
+
+<P>
+This delay therefore is measured on some media covered by this article,
+and the results are bundled into a benchmark suite, to be published
+when safecopy-1.5 is, together with this article, data files and scripts.
+
+<P>
+
+<H2><A NAME="SECTION00071000000000000000">
+6.1 Seek time evaluation on KNOPPIX CD</A>
+</H2>
+
+<P>
+Doing a forced seek over the whole disk (on the Dell drive) with a
+sparse include file using safecopy, resulted in the following read
+times:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="287"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 22:</STRONG>
+Sector seek time on original disk.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img35.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{20_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_sector1.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+After setting up the simulator to delay to 649 nanoseconds per seeked
+sector, the simulation of the same sequence lead to these very accurate
+timings:
+
+<P>
+
+<DIV ALIGN="CENTER"><A NAME="291"></A>
+<TABLE>
+<CAPTION ALIGN="BOTTOM"><STRONG>Figure 23:</STRONG>
+Simulation of sector seek time.</CAPTION>
+<TR><TD><IMG
+ WIDTH="462" HEIGHT="321" ALIGN="BOTTOM" BORDER="0"
+ SRC="img36.png"
+ ALT="\includegraphics[width=0.5\paperwidth]{21_home_raven_src_safecopy_simulator_doc_eps_knoppix-on-dell_sector2.eps}">
+
+<P></TD></TR>
+</TABLE>
+</DIV>
+
+<P>
+The difference in seek and read times when reading media ``backwards''
+however are still not simulated. My assumption would be that seeking
+backwards on a CD might be slower, while on a hard disk there should
+be no measurable difference. However since safecopy does not offer
+a ``read backwards'' mode, measuring these is currently just too
+much effort.
+
+<H1><A NAME="SECTION00080000000000000000">
+About this document ...</A>
+</H1>
+ <STRONG>Statistical analysis of damaged data storage media read timings.</STRONG><P>
+This document was generated using the
+<A HREF="http://www.latex2html.org/"><STRONG>LaTeX</STRONG>2<tt>HTML</tt></A> translator Version 2008 (1.71)
+<P>
+Copyright &#169; 1993, 1994, 1995, 1996,
+<A HREF="http://cbl.leeds.ac.uk/nikos/personal.html">Nikos Drakos</A>, 
+Computer Based Learning Unit, University of Leeds.
+<BR>
+Copyright &#169; 1997, 1998, 1999,
+<A HREF="http://www.maths.mq.edu.au/~ross/">Ross Moore</A>, 
+Mathematics Department, Macquarie University, Sydney.
+<P>
+The command line arguments were: <BR>
+ <STRONG>latex2html</STRONG> <TT>-no_subdir -split 0 -show_section_numbers analysis.tex</TT>
+<P>
+The translation was initiated by Corvus V Corax on 2009-07-28<HR>
+<!--Navigation Panel-->
+<IMG WIDTH="81" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="next_inactive"
+ SRC="file:/usr/lib/latex2html/icons/nx_grp_g.png"> 
+<IMG WIDTH="26" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="up"
+ SRC="file:/usr/lib/latex2html/icons/up_g.png"> 
+<IMG WIDTH="63" HEIGHT="24" ALIGN="BOTTOM" BORDER="0" ALT="previous"
+ SRC="file:/usr/lib/latex2html/icons/prev_g.png">   
+<BR>
+<!--End of Navigation Panel-->
+<ADDRESS>
+Corvus V Corax
+2009-07-28
+</ADDRESS>
+</BODY>
+</HTML>

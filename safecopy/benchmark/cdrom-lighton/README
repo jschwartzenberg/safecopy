@@ -1,0 +1,5 @@
+This simulates a 700MB CDROM (with data coming from /dev/zero)
+2048 byte per sector
+The disk has several areas with bad sectors simulating scratches
+and damaged reflective layer.
+Reading behaviour mimics a LightOn CDRW drive.

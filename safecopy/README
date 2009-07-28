@@ -419,7 +419,7 @@ Options:
 	              Blocks not in the -I file, or covered by the file
 	              specified with -X are save from being overwritten.
 	              Default: none
-	--debug <level> : Enable debug output. Level is a bitfield,
+	--debug <level> : Enable debug output. Level is a bit field,
 	                  add values together for more information:
 	                     program flow:     1
 	                     IO control:       2

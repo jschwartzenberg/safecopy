@@ -1,0 +1,3 @@
+This simulates a 5.25 inch floppy disk (with data coming from /dev/zero)
+80 tracks, 512 byte per sector, 1.2 MB capacity.
+The disk has some buggy sectors on track 0 and 1

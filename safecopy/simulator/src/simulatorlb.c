@@ -88,16 +88,18 @@ static inline long int timediff() {
 
 }
 
-
-static inline void delay(long microseconds) {
-	sleeptime=microseconds;
-}
-
 static inline void dodelay(int factor) {
 	static unsigned long x;
 	x=1;
 	x=x<<factor;
-	delay(x*slowsectordelay);
+	sleeptime=(x*slowsectordelay);
+}
+
+static inline void adddelay(int factor) {
+	static unsigned long x;
+	x=1;
+	x=x<<factor;
+	sleeptime+=(x*slowsectordelay);
 }
 
 static inline void dosleep() {
@@ -495,11 +497,21 @@ ssize_t read(int fd,void *buf,size_t count) {
 			dodelay(0);
 		}
 		for (count1=block1+1;count1<=block2;count1++) {
-			if (isinlist(softerror,&softerrorptr,&softerrors,count1) && max>count1*blocksize) {
-				max=count1*blocksize;
-			}
-			if (isinlist(harderror,&harderrorptr,&harderrors,count1) && max>count1*blocksize) {
-				max=count1*blocksize;
+			if (max>count1*blocksize) {
+				if (isinlist(softerror,&softerrorptr,&softerrors,count1)) {
+					max=count1*blocksize;
+					break;
+				} else if (isinlist(harderror,&harderrorptr,&harderrors,count1)) {
+					max=count1*blocksize;
+					break;
+				} else if(count1*blocksize<current+result) {
+					//ignore sector boundary address itself but add "touched" sectors to delay
+					if (isinlist(slowsector,&slowsectorptr,&slowsectors,count1)) {
+						adddelay(slowsector[slowsectorptr].goodtime);
+					} else {
+						adddelay(0);
+					}
+				}
 			}
 		}
 		if (current+result>max) {

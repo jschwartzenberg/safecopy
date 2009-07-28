@@ -1,0 +1,2218 @@
+#LyX 1.5.7 created this file. For more info see http://www.lyx.org/
+\lyxformat 276
+\begin_document
+\begin_header
+\textclass article
+\language english
+\inputencoding auto
+\font_roman default
+\font_sans default
+\font_typewriter default
+\font_default_family default
+\font_sc false
+\font_osf false
+\font_sf_scale 100
+\font_tt_scale 100
+\graphics default
+\paperfontsize default
+\spacing single
+\papersize a4paper
+\use_geometry false
+\use_amsmath 1
+\use_esint 1
+\cite_engine basic
+\use_bibtopic false
+\paperorientation portrait
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\defskip medskip
+\quotes_language english
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tracking_changes false
+\output_changes false
+\author "" 
+\author "" 
+\end_header
+
+\begin_body
+
+\begin_layout Title
+Statistical analysis of damaged data storage media read timings.
+\end_layout
+
+\begin_layout Author
+Corvus Corax
+\end_layout
+
+\begin_layout Date
+2009-07-28
+\end_layout
+
+\begin_layout Abstract
+Data storage devices and drivers show characteristic behavior when operating
+ on damaged media, especially concerning read timings.
+ A read attempt on a damaged sector can take several magnitudes more time
+ than a regular read attempt, which has implications on the performance
+ of data recovery software.
+ This article attempts to shed some light on the behavior of a couple of
+ example hardware and its characteristics and tries to deduct consequences
+ for the performance of recovery software and implied requirements for program
+ behavior and development.
+ The goal is to gather information for a 
+\begin_inset Quotes eld
+\end_inset
+
+simulated bad media
+\begin_inset Quotes erd
+\end_inset
+
+ environment which can be used to benchmark different data recovery tools
+ under reproducible conditions which mimic real world bad media behavior.
+ 
+\end_layout
+
+\begin_layout Abstract
+\begin_inset LatexCommand tableofcontents
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Section
+Statistical data generation
+\end_layout
+
+\begin_layout Standard
+Statistical data is gathered using the tool 
+\emph on
+safecopy
+\emph default
+ (
+\begin_inset LatexCommand htmlurl
+name "safecopy web page"
+target "http://safecopy.sourceforge.net"
+
+\end_inset
+
+) version 1.5.
+ It provides the following features:
+\end_layout
+
+\begin_layout Itemize
+Attempt to read every sector of a storage medium.
+\end_layout
+
+\begin_layout Itemize
+Generate and store timing information on each read attempt.
+\end_layout
+
+\begin_layout Itemize
+Ability to identify different categories of sectors, as there are:
+\end_layout
+
+\begin_deeper
+\begin_layout Itemize
+
+\emph on
+readable sectors
+\end_layout
+
+\begin_layout Itemize
+
+\emph on
+unreadable sectors
+\end_layout
+
+\begin_layout Itemize
+sectors that upon multiple read attempts sometimes succeed and sometimes
+ fail.
+ hence called
+\emph on
+ recoverable sectors
+\end_layout
+
+\end_deeper
+\begin_layout Subsection
+Options for data generation
+\end_layout
+
+\begin_layout Standard
+To produce significant statistical data, user definable options for safecopy
+ are set as follows for all statistic gatherings:
+\end_layout
+
+\begin_layout Description
+--sync Safecopy will use synchronous or direct IO, bypassing kernel caching,
+ reducing the imprint of kernel behavior on the read timing.
+\end_layout
+
+\begin_layout Description
+-L\InsetSpace ~
+2 Safecopy will use low level IO where applicable, which in case of CDROM
+ media bypasses kernel driver error correction and reads sectors in so called
+ 
+\emph on
+raw mode
+\emph default
+ directly from the drive.
+\end_layout
+
+\begin_layout Description
+-Z\InsetSpace ~
+0 This disables a feature of safecopy that forces head realignments after
+ read errors occurred.
+ Since head realignments induce delays for repositioning the drive head
+ on the following read attempt, this would falsify acquired statistical
+ data and needs to be disabled.
+\end_layout
+
+\begin_layout Description
+-R\InsetSpace ~
+4 Safecopy will try to read at least the first sector of a found bad area
+ 4 times before giving up and skipping to the next sector.
+ This is necessary to successfully detect some 
+\emph on
+recoverable sectors
+\emph default
+ and provide timing data on them.
+\end_layout
+
+\begin_layout Description
+-f\InsetSpace ~
+1* Safecopy will try to read every single sector of the drive, even in
+ a concurrent bad area.
+ The default behavior would be to skip over bad areas and only check some
+ sectors to find the end of the bad area fast.
+ Since we want statistical data on the behavior of 
+\emph on
+unreadable sectors
+\emph default
+, we attempt to read on every sector instead.
+\end_layout
+
+\begin_layout Description
+-b\InsetSpace ~
+
+\noun on
+xxx
+\noun default
+ The preferred blocksize reported by the Linux kernel is 1024 byte on x86
+ systems and 4096 byte on x86_64 systems.
+ However most hardware sector sizes are 512 byte.
+ Force setting this causes safecopy to explicitly read every sector individually
+ which is what we want.
+ However some hardware uses different sector sizes.
+ CDROMs for example have a logical sector size of (usually) 2048 byte.
+\end_layout
+
+\begin_layout Description
+-T\InsetSpace ~
+timing.log Safecopy will store sector read timing statistics in this file.
+\end_layout
+
+\begin_layout Description
+-o\InsetSpace ~
+badblocks.log Safecopy will list 
+\emph on
+unrecoverable sectors
+\emph default
+ in this file.
+\end_layout
+
+\begin_layout Standard
+An example safecopy invocation to read from a CD drive on a Linux machine
+ would be:
+\end_layout
+
+\begin_layout Quote
+safecopy --sync -L 2 -Z 0 -R 4 -f 1* -T timing.log -o badblocks.log -b 2048
+ /dev/cdrom test.dat
+\end_layout
+
+\begin_layout Subsection
+Data preparation
+\end_layout
+
+\begin_layout Standard
+The relevant output of safecopy is stored in two files:
+\end_layout
+
+\begin_layout Description
+timings.log Holds sector numbers and read times in µ-seconds.
+\end_layout
+
+\begin_layout Description
+badblocks.log Holds a list of 
+\emph on
+unrecoverable sectors
+\emph default
+.
+\end_layout
+
+\begin_layout Standard
+To visualize this data meaningfully, the read timings need to be split into
+ read times for the relevant groups.
+\end_layout
+
+\begin_layout Description
+unrecoverable\InsetSpace ~
+sectors are easy to extract, since their sector numbers are
+ listed in badblocks.log.
+\end_layout
+
+\begin_layout Description
+readable\InsetSpace ~
+sectors are identifiable since they are not listed in 
+\emph on
+badblocks.log
+\emph default
+, and listed in 
+\emph on
+timing.log
+\emph default
+ exactly once.
+\end_layout
+
+\begin_layout Description
+recoverable\InsetSpace ~
+sectors are identifiable since they are not listed in 
+\emph on
+badblocks.log
+\emph default
+, but listed in timing.log multiple times, since safecopy attempted to read
+ them more than once.
+ This group can be split further into:
+\end_layout
+
+\begin_deeper
+\begin_layout Description
+unsuccessful\InsetSpace ~
+read\InsetSpace ~
+attempts on recoverable sectors, which are all entries with
+ a result code of -1.
+\end_layout
+
+\begin_layout Description
+successful\InsetSpace ~
+read\InsetSpace ~
+attempts on recoverable sectors, which are entries with a
+ positive result code.
+\end_layout
+
+\end_deeper
+\begin_layout Standard
+Sector numbers and timings for all of these groups are generated by standard
+ text file processing tools and stored in separate files.
+\end_layout
+
+\begin_layout Standard
+These files can then be read by a graphical visualization tool like 
+\emph on
+gnu-plot
+\emph default
+.
+\end_layout
+
+\begin_layout Subsection
+Shortcomings
+\end_layout
+
+\begin_layout Standard
+Safecopy only tries to repeatedly read the first sector of any set of adjacent
+ sectors that cause read errors.
+ As such, it can not distinguish between 
+\emph on
+recoverable sectors
+\emph default
+ and 
+\emph on
+unrecoverable sectors
+\emph default
+ within or at the end of such a set.
+ Also the amount of read attempts is limited to a finite amount, which implies
+ to possibility of missed 
+\emph on
+recoverable sectors
+\emph default
+, just because they did not recover during the attempted read calls.
+ Therefore it must be assumed that some of the sectors listed as unrecoverable
+ are hidden 
+\emph on
+recoverable sectors
+\emph default
+.
+\end_layout
+
+\begin_layout Standard
+On the other hand some of the sectors identified as 
+\emph on
+readable sectors
+\emph default
+ could be hidden 
+\emph on
+recoverable sectors
+\emph default
+ that happened to be successfully read on first attempt.
+ Then again every sector has the potential to eventually fail.
+\end_layout
+
+\begin_layout Standard
+This has implications when using the gathered data as a template for simulated
+ bad media, as discussed below.
+\end_layout
+
+\begin_layout Section
+Examples of bad media
+\end_layout
+
+\begin_layout Standard
+To provide data on real world behavior, statistic data has been gathered
+ on real damaged media under several different conditions.
+\end_layout
+
+\begin_layout Subsection
+The KNOPPIX CD
+\end_layout
+
+\begin_layout Standard
+CDROMs are prime suspects for data recovery statistics since they are very
+ common medias, easily damaged, and common damages to them like scratches
+ are easily reproducible.
+ The particular CD used for data generation is worn from heavy use and additiona
+lly had purposely made deep scratches on both the front and backside of
+ the self burned CD, producing both permanently damaged sectors and sectors
+ on which a drive with good error correction has a chance of recovery.
+ This CD is read in two different drives.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename images/knoppix-front.jpg
+	height 5cm
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+CDROM top.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename images/knoppix-back.jpg
+	height 5cm
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+CDROM bottom.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Physical sector size of this medium is 2352 bytes, with 2048 bytes user
+ data and 304 bytes error correction and sector address coded.
+ Safecopy can address it in RAW mode, reading the 2352 byte sectors directly,
+ but stores only 2048 byte user data in the destination file.
+ Overall disk size (user data) is 730040320 byte (696 MB).
+\end_layout
+
+\begin_layout Standard
+An interesting effect on data recovery is, while the area with missing reflectiv
+e layer around sector #100000 is just about 4 millimeters in diameter, the
+ affected count of unreadable sectors is often up to 12 sectors, which is
+ more than half a track, sometimes leaving only a few sectors readable on
+ that track.
+\end_layout
+
+\begin_layout Standard
+The likely cause of this behavior, which occur ed on all tested CD-drives,
+ is that the laser optic looses its focus where the reflective layer is
+ missing, and needs some time to refocus on the CD surface.
+ Since the CD is constantly spinning, sectors that 
+\begin_inset Quotes eld
+\end_inset
+
+spun through
+\begin_inset Quotes erd
+\end_inset
+
+ during refocusing time cannot be read.
+ The focus loss appears on every turn in that area, reproducing the 
+\begin_inset Quotes eld
+\end_inset
+
+after scratch out of focus effect
+\begin_inset Quotes erd
+\end_inset
+
+ so to speak.
+ Workarounds for that could be to force an extremely low spinning speed,
+ but since that cannot be easily set in software, it requires a firmware
+ patch or special hardware meant for data rescue.
+\end_layout
+
+\begin_layout Standard
+Re-establishing the reflective features of the CD back surface could possibly
+ reduce the out of focus effect, even if they cannot make the directly affected
+ data readable it would make the directly following data on the same track
+ re-accessible.
+ 
+\end_layout
+
+\begin_layout Subsubsection
+Dell laptop DVD drive
+\end_layout
+
+\begin_layout Standard
+The mentioned CD is read in a Dell Inspiron 8200 inbuilt DVD-ROM drive,
+ identifying itself as 
+\end_layout
+
+\begin_layout Quote
+HL-DT-STDVD-ROM GDR8081N, ATAPI CD/DVD-ROM drive
+\newline
+ATAPI 24X DVD-ROM drive,
+ 512kb Cache, DMA
+\end_layout
+
+\begin_layout Standard
+This drive is handling scratches on the front-side of the media badly, unable
+ to recover most of the affected sectors.
+ Interesting to see is the relative difference in absolute reading speed
+ as the drive automatically adjusts its spin speed when it encounters problems.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/stats1.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Sector read timings.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+As one can see, read attempts on 
+\emph on
+unrecoverable sectors
+\emph default
+ are all slower by about 3 orders of magnitude.
+ Reading from the area where the reflective layer has been damaged is even
+ slower, leading to recovery times up to 10 seconds per block.
+\end_layout
+
+\begin_layout Standard
+
+\emph on
+Unrecoverable sectors
+\emph default
+ are heavily mixed with 
+\emph on
+readable sectors
+\emph default
+ and 
+\emph on
+recoverable sectors
+\emph default
+ in bad areas, usually with both types on the same track, only a small number
+ of sectors apart, but spanning over a noticeable span of tracks affected
+ by the error cause.
+\end_layout
+
+\begin_layout Paragraph
+Note: This statistic diagram has been created with an older timing.log creation
+ algorithm, not including a result code for sector read attempts.
+ Therefore its listing some bogus 
+\emph on
+unsuccessful read attempts
+\emph default
+ which had been 
+\emph on
+readable sectors
+\emph default
+ just past the end of a bad area which have been read twice.
+ Eventually this sheet needs to be re-created to distinguish this group
+ from real recovered sectors.
+
+\emph on
+ 
+\end_layout
+
+\begin_layout Subsubsection
+LiteOn CDRW drive
+\end_layout
+
+\begin_layout Standard
+The same CD is read in a 
+\end_layout
+
+\begin_layout Quote
+LITE-ON LTR-32123S, ATAPI CD/DVD-ROM drive
+\newline
+ATAPI 40X CD-ROM CD-R/RW drive,
+ 1984kB Cache
+\end_layout
+
+\begin_layout Standard
+This drive performs significantly better in terms of reading from problematic
+ media.
+ It has read most of the data covered by scratches on the underside of the
+ CD.
+ Its hard to belief this was the same source medium.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-lighton/stats1.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Sector read timings.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Here, too, 
+\emph on
+unrecoverable sectors
+\emph default
+ are heavily mixed with 
+\emph on
+readable sectors
+\emph default
+ and 
+\emph on
+recoverable sectors
+\emph default
+ in the bad area, as described above due to the laser refocusing issue.
+\end_layout
+
+\begin_layout Subsubsection
+Samsung DVD-ROM
+\end_layout
+
+\begin_layout Quote
+SAMSUNG DVD-ROM SD-608, ATAPI CD/DVD-ROM drive
+\newline
+ATAPI 32X DVD-ROM drive, 512kB
+ Cache
+\end_layout
+
+\begin_layout Standard
+This particular drive has not been used for statistics collection, it is
+ just mentioned for reference.
+ Any occurred unreadable sector caused a firmware crash, leading to a 60
+ second timeout during which the drive would not respond, followed by an
+ ATAPI bus reset and a drive reset, automatically issued by the kernel,
+ rebooting of the drive firmware.
+ Reading an entire damaged CD on this drive would simply have taken far
+ too long.
+\end_layout
+
+\begin_layout Subsection
+5¼
+\begin_inset Quotes erd
+\end_inset
+
+ floppy
+\end_layout
+
+\begin_layout Standard
+While hopelessly outdated, any old floppy disks still around are by now
+ bound to have at least some unreadable sectors due to loss of magnetization,
+ dust, long term effect of background radioactivity, etc.
+ Therefore its likely that any important data needing to be recovered from
+ such a disk will be subject to data recovery tools.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename images/old-floppy.jpg
+	height 5cm
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+5¼
+\begin_inset Quotes erd
+\end_inset
+
+ floppy disk.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Sector size of this medium is 512 byte, stored in IBM AT 1.2 MB 80 track
+ low level format.
+ Safecopy reads this medium through the Linux kernel driver from a standard
+ (though old and dusty) 5¼
+\begin_inset Quotes erd
+\end_inset
+
+ floppy drive using O_DIRECT for reading from /dev/fd1, seeing only the
+ 512 byte user data per block.
+ This particular disk has 3 unreadable sectors on tracks 0 and 1 for unknown
+ reasons (probably loss of magnetization).
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/floppy/stats1.eps
+	width 50page%
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Caption
+
+\begin_layout Standard
+Timing behavior of this disk.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+A significant feature of these drives is the high head positioning time,
+ resulting in high read times for the first sector of each track.
+ This delay is is in the same order of magnitude as the delay imposed by
+ read errors.
+ However the exact timings for sectors in the different groups are all significa
+ntly distinct.
+\end_layout
+
+\begin_layout Standard
+Bad sectors are more than 4 orders of magnitudes slower to respond than
+ good ones.
+\end_layout
+
+\begin_layout Standard
+A feature of this particular disk is the low amount of 
+\emph on
+unrecoverable sectors
+\emph default
+.
+ Never the less, the existing bad sectors occur physically and logically
+ close to each other, grouped in a 
+\emph on
+bad area
+\emph default
+.
+\end_layout
+
+\begin_layout Subsection
+2½
+\begin_inset Quotes erd
+\end_inset
+
+ IDE hard disk
+\end_layout
+
+\begin_layout Standard
+SATA and PATA hard disks of different capacity are among the most common
+ hard disks found, and as such often subject to data recovery.
+ According to Murphy's law the probability of fatal hard disk failure increases
+ exponentially with the time since the last backup.
+ Recovery performance on these disks is heavily influenced by intelligent
+ drive firmware, sometimes even for the better.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename images/harddisk.jpg
+	height 5cm
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+IDE disk drive.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+This is a 6007357440 byte (6 so called GB) IDE drive with a logical sector
+ size of 512 byte, identifying as:
+\end_layout
+
+\begin_layout Quote
+TOSHIBA MK6015MAP, ATA DISK drive
+\newline
+Model=TOSHIBA MK6015MAP, FwRev=U8.12 A,
+ Serial No=51K92837T
+\end_layout
+
+\begin_layout Standard
+This drive had been removed from a laptop after sector read errors occurred.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/hdd/stats1.png
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Sector read timings.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+As one can see, similar to the behavior of CD-ROMS, the drive firmware reduces
+ the absolute drive speed after it encounters errors.
+ However the drive does not spin up again until a subsequent power down.
+ On hard disks, the difference in read timings between successfully read
+ data and errors is extreme, ranging over 5 orders of magnitude! (100 SEC
+ versus 10 seconds per sector)
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/hdd/stats2.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+A closeup of the bad area.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Paragraph
+Note: No recoverable sectors have been found on this particular drive.
+ However earlier field tests of safecopy on damaged IDE drives encountered
+ several cases where sectors could be recovered.
+ Unfortunately no timing data is available on those.
+\end_layout
+
+\begin_layout Section
+Implications on the efficiency of data rescue
+\end_layout
+
+\begin_layout Standard
+The examined data confirmed the assumption that accessing 
+\emph on
+unrecoverable sectors
+\emph default
+ or even 
+\emph on
+recoverable sectors
+\emph default
+ is exceedingly slow to accessing 
+\emph on
+readable sectors
+\emph default
+.
+ It also shows a typical distribution of unrecoverable sectors, which are
+ clustered in 
+\emph on
+bad areas
+\emph default
+, caused by a shared error cause (for example a scratch, or a head crash).
+ This bad areas can span from a few tracks up to a significant part of the
+ storage medium, depending again on the error cause and severity.
+\end_layout
+
+\begin_layout Standard
+It needs to be kept in mind that on some media (for example a HDD with a
+ head crash) accessing 
+\emph on
+unrecoverable sectors
+\emph default
+, or even 
+\emph on
+bad areas
+\emph default
+ can potentially further damage the drive, rendering more sectors unreadable
+ and increasing data loss.
+\end_layout
+
+\begin_layout Standard
+Therefore, when recovering data from a bad medium, accessing 
+\emph on
+unrecoverable sectors
+\emph default
+ should be avoided completely and accessing 
+\emph on
+recoverable sectors
+\emph default
+ should be minimized and take place at the end of a recovery process.
+ Accessing data outside of 
+\emph on
+bad areas
+\emph default
+ should take place at the beginning.
+\end_layout
+
+\begin_layout Standard
+Within a 
+\emph on
+bad area
+\emph default
+ itself there are two likely sector distributions:
+\end_layout
+
+\begin_layout Enumerate
+All sectors in the bad area are 
+\emph on
+unrecoverable sectors
+\emph default
+, optionally with some 
+\emph on
+recoverable sectors
+\emph default
+ at the rim.
+\end_layout
+
+\begin_layout Enumerate
+Parts of the affected tracks are readable, resulting in an approximately
+ periodic oscillation of 
+\emph on
+readable sectors
+\emph default
+ and 
+\emph on
+unrecoverable sectors
+\emph default
+ optionally with some 
+\emph on
+recoverable sectors
+\emph default
+ at the borderline.
+ All of the analyzed media for this article showed this type of distribution.
+\end_layout
+
+\begin_layout Standard
+The first, straightforward error distribution can be dealt with efficiently
+ by establishing its begin and end sector with a small amount of read attempts
+ and reading the rest of the disk, by algorithms current data rescue tools
+ (safecopy, ddrescue, etc) already apply.
+\end_layout
+
+\begin_layout Standard
+For the second (and apparently more common) distribution however, a satisfying
+ solution is difficult to find.
+ Even finding the end of the 
+\emph on
+bad area
+\emph default
+ with few read attempts is tricky, since there is a chance that such a read
+ attempt matches a 
+\emph on
+readable sector
+\emph default
+ within the 
+\emph on
+bad area
+\emph default
+, suggesting a premature end of the 
+\emph on
+bad area
+\emph default
+.
+ This could be coped with heuristic approaches, for example by analyzing
+ the periodicity of the disk and guessing the likeliness of an 
+\emph on
+unreadable sector
+\emph default
+ based on its track position modulo relative to the first encountered bad
+ sector.
+ For this however the disk geometry must be known, since sector counts per
+ track vary from disk to disk and sometimes even from track to track.
+ In such a case the likeliness of guessing correctly would be increasingly
+ low the further a guessed sector is apart from the reference sector.
+\end_layout
+
+\begin_layout Standard
+The other problem with the second distribution is potentially recoverable
+ data within a 
+\emph on
+bad area
+\emph default
+.
+ Especially on hard disks with multiple physical disks inside, the amount
+ of data on a singly cylinder (spanning all disk surfaces) and as such between
+ two sets of 
+\emph on
+unrecoverable sectors
+\emph default
+ can be significantly high, and potentially span entire files that need
+ to be recovered.
+\end_layout
+
+\begin_layout Standard
+It is thinkable that a heuristic approach could rescue some of this data
+ fast, if making use of the periodicity and the Gaussian-like guessable
+ size of the bad spot within each track, avoiding those areas.
+ However this still won't rescue readable and recoverable sectors closer
+ to the unrecoverable sectors on the same track, requiring a more thorough
+ access later.
+\end_layout
+
+\begin_layout Subsection
+Implication on safecopy development
+\end_layout
+
+\begin_layout Standard
+The bad area skipping algorithm of safecopy currently works quite efficiently
+ at avoiding 
+\emph on
+unrecoverable sectors
+\emph default
+ within a 
+\emph on
+set of unrecoverable sectors
+\emph default
+ on a single track.
+ However skipping over entire 
+\emph on
+bad areas
+\emph default
+ in a first rescue attempt is done via a relatively dump approach (--stage
+ 1 skips 10% of the disk regardless of the size of the erroneous area).
+ As mentioned above, finding the end of an oscillating 
+\emph on
+bad area
+\emph default
+ efficiently is a non trivial process if the disk geometry is not known.
+ A heuristic algorithm that efficiently determines those could therefore
+ increase the data rescue effectiveness of safecopy.
+\end_layout
+
+\begin_layout Standard
+The same is true for rescuing within a 
+\emph on
+bad area
+\emph default
+.
+ A probabilistic approach could proactively avoid accessing sectors if they
+ have a high likeliness of being unreadable, and treat them like 
+\emph on
+unreadable sectors
+\emph default
+, to be accessed in a later safecopy run.
+\end_layout
+
+\begin_layout Standard
+For both of these the periodicity of errors needs to be learned on the fly
+ for each particular medium.
+ Since safecopy can distinguish some hardware by means of its low level
+ driver, for some media a assumed geometry can be provided by the low level
+ back end.
+\end_layout
+
+\begin_layout Standard
+The best implementation would probably be an optionally activatable heuristic
+ module, which would dynamically adjust seek resolution and failure skip
+ size, and proactively assume sectors to be bad based on probabilism.
+ Since the geometry is subject to change, the probabilism should decrease
+ with the 
+\begin_inset Quotes eld
+\end_inset
+
+distance
+\begin_inset Quotes erd
+\end_inset
+
+ to the last occurred 
+\begin_inset Quotes eld
+\end_inset
+
+real
+\begin_inset Quotes erd
+\end_inset
+
+ error.
+\end_layout
+
+\begin_layout Subsection
+Implications on other tools
+\end_layout
+
+\begin_layout Standard
+After creating a benchmark to create reproducible test result of the behavior
+ of a recovery tool under realistic conditions, this can be used to benchmark
+ other tools to show their strengths and shortcomings in comparison, and
+ lead to conclusions on the effectiveness of different approaches.
+\end_layout
+
+\begin_layout Section
+Benchmark creation
+\end_layout
+
+\begin_layout Standard
+A benchmark for data recovery should mimic the behavior of a set of representati
+ve test cases of real bad media.
+ For the creation of this benchmark suite both the qualitative effect of
+ a sector read attempt and the time consumption of such should be realistic.
+\end_layout
+
+\begin_layout Standard
+A good starting point for such a benchmark is the debug test library coming
+ with safecopy, since it sets up a test environment transparently for a
+ to be tested program unaware of this virtual environment.
+ The test library of safecopy 1.4 already provides the ability to produce
+ simulated recoverable and unrecoverable sectors, so all it needs in addition
+ to this is the ability to simulate timing behavior, and a reference set
+ of to be simulated realistic test media behavior.
+\end_layout
+
+\begin_layout Subsection
+Approximated timing behavior.
+\end_layout
+
+\begin_layout Standard
+As the analysis of the timing statistics of real media above suggests, the
+ timing behavior of tested media can be approximated with a simplifying
+ timing behavior, as long as the spanning of read timing over orders of
+ magnitude is kept in a way it would still mimic the characteristic of real
+ media.
+ Non exponential variations on the other side can probably be ignored since
+ they are subject to uncontrollable dynamic causes (CPU and IO load caused
+ by other processes, etc).
+ That leads to the following observations.
+\end_layout
+
+\begin_layout Itemize
+The majority of 
+\emph on
+readable sectors
+\emph default
+ are read within a certain constant time frame
+\begin_inset Formula $T1\pm E$
+\end_inset
+
+.
+\end_layout
+
+\begin_layout Itemize
+Reading from a limited amount of 
+\emph on
+readable sectors
+\emph default
+ s takes longer than 
+\begin_inset Formula $T1\pm E$
+\end_inset
+
+ by approximately factor 
+\begin_inset Formula $2^{X_{s}}$
+\end_inset
+
+.
+\end_layout
+
+\begin_layout Itemize
+Attempting to read from an 
+\emph on
+unrecoverable sectors
+\emph default
+ b takes time 
+\begin_inset Formula $(T1\pm E)*2^{X_{b}}$
+\end_inset
+
+, which is usually several orders of magnitude bigger than T1.
+\end_layout
+
+\begin_layout Itemize
+Reading from 
+\emph on
+recoverable sectors
+\emph default
+ either fails, in which case the read attempt takes about as long to respond
+ as an 
+\emph on
+unrecoverable sector
+\emph default
+, or it succeeds within the time bounds of a 
+\emph on
+readable sector
+\emph default
+.
+\end_layout
+
+\begin_layout Standard
+Therefore a 
+\emph on
+simplified media timing characteristics
+\emph default
+ specification can be given for any media by specifying the following:
+\end_layout
+
+\begin_layout Itemize
+A base time T1 used for the majority of 
+\emph on
+readable sectors
+\emph default
+.
+\end_layout
+
+\begin_layout Itemize
+A sector timing 
+\family roman
+\series medium
+\shape up
+\size normal
+\emph off
+\bar no
+\noun off
+\color none
+exponent 
+\begin_inset Formula $x_{s}\in\{Xs\}$
+\end_inset
+
+
+\family default
+\series default
+\shape default
+\size default
+\emph default
+\bar default
+\noun default
+\color inherit
+ for each 
+\emph on
+readable sector
+\emph default
+ s that takes significantly long to read from.
+\end_layout
+
+\begin_layout Itemize
+A sector timing 
+\family roman
+\series medium
+\shape up
+\size normal
+\emph off
+\bar no
+\noun off
+\color none
+exponent 
+\begin_inset Formula $x_{b}\in\{Xb\}$
+\end_inset
+
+
+\family default
+\series default
+\shape default
+\size default
+\emph default
+\bar default
+\noun default
+\color inherit
+ for each 
+\emph on
+unrecoverable sector
+\emph default
+ b.
+\end_layout
+
+\begin_layout Itemize
+Two sector timing exponents 
+\family roman
+\series medium
+\shape up
+\size normal
+\emph off
+\bar no
+\noun off
+\color none
+
+\begin_inset Formula $x_{r}\in\{Xr\}$
+\end_inset
+
+ and 
+\begin_inset Formula $Y_{r}\in\{Yr\}$
+\end_inset
+
+ for each recoverable sector r, storing the reading time in both the readable
+ and unreadable case.
+\end_layout
+
+\begin_layout Subsection
+Simulation requirements.
+\end_layout
+
+\begin_layout Standard
+A benchmark tool that wants to simulate a damaged medium according to the
+ 
+\emph on
+simplified media timing characteristics
+\emph default
+ deducted above must simulate the following:
+\end_layout
+
+\begin_layout Itemize
+
+\emph on
+readable sectors
+\emph default
+ that respond in time T1.
+\end_layout
+
+\begin_layout Itemize
+a limited defined set of 
+\emph on
+readable sectors
+\emph default
+ that respond in time 
+\begin_inset Formula $T1*2^{X_{s}}$
+\end_inset
+
+.
+\end_layout
+
+\begin_layout Itemize
+a limited defined set of unrecoverable sectors that respond with failure
+ in time 
+\begin_inset Formula $T1*2^{X_{b}}$
+\end_inset
+
+,
+\end_layout
+
+\begin_layout Itemize
+a limited defined set of recoverable sectors r that respond either
+\end_layout
+
+\begin_deeper
+\begin_layout Itemize
+with failure in time 
+\begin_inset Formula $T1*2^{X_{r}}$
+\end_inset
+
+ or
+\end_layout
+
+\begin_layout Itemize
+with success in time 
+\begin_inset Formula $T1*2^{Y_{r}}$
+\end_inset
+
+.
+\end_layout
+
+\end_deeper
+\begin_layout Standard
+Where T1, {Xs}, {Xb}, {Xr}, {Yr} and the sectors in each set are the 
+\emph on
+simplified media timing characteristics
+\emph default
+ of the test medium.
+\end_layout
+
+\begin_layout Standard
+These requirements are met by the modified test debug library as shipped
+ with safecopy-1.5.
+\end_layout
+
+\begin_layout Subsection
+Shortcomings
+\end_layout
+
+\begin_layout Standard
+Some characteristic behavior of media can not be described by the 
+\emph on
+simplified media timing characteristics
+\emph default
+.
+ This model simulates sector read times for each sector individually.
+ On real world media however, the read time also depends on the state of
+ the drive.
+\end_layout
+
+\begin_layout Standard
+One important feature not modelled is the seek time a drive needs to address
+ a certain sector.
+ Instead, as can be seen on the floppy disk data, these times are simulated
+ as a feature of a single sector (for example the first sector of a track).
+ However this doesn't apply to real world media, as this delay depends on
+ the sequence and order of sectors being read.
+ For example reading a media backwards would induce this delay on the last
+ sector of a track instead.
+\end_layout
+
+\begin_layout Standard
+A possible workaround would be to measure seeking times on a device and
+ include them into the simulation.
+ However the seek time is a complex function depending on both head position,
+ turning speed, turning position and several other drive dependant parameters,
+ which can not easily be measured in the generic case.
+ A linear delay function depending on the block address distance of current
+ position and seeking destination could probably create better simulation
+ results if the reading software does a lot of seeking, however the accuracy
+ of simulation would still be lacking.
+\end_layout
+
+\begin_layout Section
+Creation of test cases
+\end_layout
+
+\begin_layout Standard
+To create and demonstrate a benchmark test case, the statistical data of
+ a real media test must be analyzed and the parameters of the 
+\emph on
+simplified media timing characteristics
+\emph default
+ need to be determined.
+ This test case should then be validated by comparing the statistics generated
+ on the test case to the base data set of the real media and confirm that
+ the test case behaves 
+\begin_inset Quotes eld
+\end_inset
+
+reasonably similar
+\begin_inset Quotes erd
+\end_inset
+
+ to the original.
+ 
+\begin_inset Quotes eld
+\end_inset
+
+Reasonably similar
+\begin_inset Quotes erd
+\end_inset
+
+ hereby means, closer to each other than to the typical damaged media that
+ is not the reference source, while also making recovery tools behave similarly,
+ when comparing success rate and time consumption.
+\end_layout
+
+\begin_layout Subsection
+CDROM example
+\end_layout
+
+\begin_layout Standard
+Data source for this example is the above mentioned KNOPPIX CD read on the
+ Dell.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/stats2.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Original read timings.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Calculating the exponent multiplicands based on T1 leads to the following
+ 
+\emph on
+simplified media timing characteristics
+\emph default
+:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/smc.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+
+\emph on
+Simplified media characteristics
+\emph default
+.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Simulating this disk, using the safecopy test debug library, measuring sector
+ read timings with safecopy-1.5, the following sector read timing statistics
+ were gathered:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/simulation.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+The simulation result.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+As expected, there are random derivations of actual sector read timings
+ from the simulated times, but they stay within the estimated error band
+ E where 
+\begin_inset Formula $t=(T1\pm E)*2^{X_{s}}$
+\end_inset
+
+.
+ Therefore the simplification of the simulation results would reproduce
+ the original 
+\emph on
+simplified media characteristics
+\emph default
+ given by T1,{Xs},{Xb},{Xr},{Yr}.
+\end_layout
+
+\begin_layout Standard
+During simulation, the same sectors were recovered as in the original safecopy
+ run on the real disk and read attempts were undertaken on the same sectors.
+ Intuitively the above requirements of 
+\begin_inset Quotes eld
+\end_inset
+
+reasonable similarity
+\begin_inset Quotes erd
+\end_inset
+
+ seem to be met.
+ To give this claim foundation it is necessary to calculate the accumulated
+ performance difference between original run and simulation based on the
+ gathered statistics:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/error.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+The error between reading the media and the simulation.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+The simulation by 
+\emph on
+simplified media characteristics
+\emph default
+ caps the reading time error at ±200% for each single sector, while the
+ overall reading time for the whole disk is determined by the reading time
+ error accumulated through the most dominant sectors.
+ In the case of this CD, those clearly are damaged sectors.
+\end_layout
+
+\begin_layout Standard
+The similarity between the two curves for overall reading time is clearly
+ visible in this diagram.
+\end_layout
+
+\begin_layout Subsection
+Other CDROM drive
+\end_layout
+
+\begin_layout Standard
+The same CD in a LightOn drive:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-lighton/stats2.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Original.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-lighton/smc.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+
+\emph on
+Simplified media timing characteristics
+\emph default
+.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-lighton/simulation.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Simulation.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-lighton/error.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+The error between reading the media and the simulation.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Subsection
+Floppy example
+\end_layout
+
+\begin_layout Standard
+Data source is the above analyzed 5¼
+\begin_inset Quotes erd
+\end_inset
+
+ floppy disk.
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/floppy/stats2.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Read timings on the original disk.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/floppy/smc.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+
+\emph on
+Simplified media timing characteristics.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/floppy/smc.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Simulation.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/floppy/error.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+The error between reading the media and the simulation.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Most of the simulated 
+\emph on
+readable sectors
+\emph default
+ take a bit too long to read.
+ However the overall simulation is too short by about 20%, since the significant
+ly long read times of the dominant first sector of each track (originally
+ caused by head seeking) are simulated about that percentage too fast.
+ This errors are within the expected error margin of the 
+\emph on
+simplified media characteristics
+\emph default
+.
+\end_layout
+
+\begin_layout Section
+Conclusion
+\end_layout
+
+\begin_layout Standard
+It seems to be possible to undertake a reasonably accurate simulation of
+ the behavior of damaged media and use this for benchmarking recovery tools
+ based on 
+\emph on
+simplified media characteristics
+\emph default
+.
+\end_layout
+
+\begin_layout Standard
+The most important aspect not covered is, that a benchmark simulation would
+ need to simulate the time consumption of seeking.
+ Otherwise data recovery tools that do a lot of seeking on the source media
+ had the potential to behave significantly better on the benchmark than
+ on real damaged media.
+ However a linear delay, based on sector address difference should be sufficient
+ to penalize excessive seeking, even if it does not simulate real world
+ seek times accurately in all cases.
+\end_layout
+
+\begin_layout Standard
+Special consideration needs to be taken about media where seeking times
+ are high compared to read times of damaged sectors even during a linear
+ read, like the seen 5¼
+\begin_inset Quotes erd
+\end_inset
+
+ floppy disk.
+ If the seek time is simulated by the above separate algorithm, significant
+ delays inflicted on single sectors by seeking during statistics gathering
+ of the source must be compensated by taking those sectors out of the {Xs}
+ set.
+\end_layout
+
+\begin_layout Standard
+Luckily most media types have insignificant seek times when reading linearly,
+ so no compensation needs to be done.
+\end_layout
+
+\begin_layout Standard
+To estimate the seek time, we compare the sector read times of two readable
+ sectors that are physically far apart and are not in {Xs} (meaning their
+ read time when reading linearly is within 
+\begin_inset Formula $t=(T1\pm E)*2^{0}=T1\pm E$
+\end_inset
+
+ ) when read directly after each other.
+ The seek time to seek a distance of one sector would then be calculated
+ as 
+\begin_inset Formula $t_{seek}=\frac{t_{2}-T1}{n}$
+\end_inset
+
+ where t2 is the read time of the second sector and n is the numbers of
+ sectors the two sectors are apart.
+\end_layout
+
+\begin_layout Standard
+This delay therefore is measured on some media covered by this article,
+ and the results are bundled into a benchmark suite, to be published when
+ safecopy-1.5 is, together with this article, data files and scripts.
+\end_layout
+
+\begin_layout Subsection
+Seek time evaluation on KNOPPIX CD
+\end_layout
+
+\begin_layout Standard
+Doing a forced seek over the whole disk (on the Dell drive) with a sparse
+ include file using safecopy, resulted in the following read times:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/sector1.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Sector seek time on original disk.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+After setting up the simulator to delay to 649 nanoseconds per seeked sector,
+ the simulation of the same sequence lead to these very accurate timings:
+\end_layout
+
+\begin_layout Standard
+\begin_inset Float figure
+placement h
+wide false
+sideways false
+status open
+
+\begin_layout Standard
+\begin_inset Graphics
+	filename eps/knoppix-on-dell/sector2.eps
+	width 50page%
+
+\end_inset
+
+
+\begin_inset Caption
+
+\begin_layout Standard
+Simulation of sector seek time.
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+The difference in seek and read times when reading media 
+\begin_inset Quotes eld
+\end_inset
+
+backwards
+\begin_inset Quotes erd
+\end_inset
+
+ however are still not simulated.
+ My assumption would be that seeking backwards on a CD might be slower,
+ while on a hard disk there should be no measurable difference.
+ However since safecopy does not offer a 
+\begin_inset Quotes eld
+\end_inset
+
+read backwards
+\begin_inset Quotes erd
+\end_inset
+
+ mode, measuring these is currently just too much effort.
+\end_layout
+
+\end_body
+\end_document

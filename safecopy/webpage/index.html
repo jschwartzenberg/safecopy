@@ -12,20 +12,36 @@ safecopy
 <A href="http://sourceforge.net"><IMG src="http://sourceforge.net/sflogo.php?group_id=141056&amp;type=5" width="210" height="62" border="0" alt="SourceForge.net Logo" /></A>
 </p>
 <h2>
-safecopy is a data recovery tool which tries to extract as much data as possible from a problematic (i.e. damaged sectors) source - like floppy drives, hard disk partitions, CDs, tape devices, ..., where other tools like dd would fail due to I/O errors.
+safecopy is a data recovery tool which tries to extract as much data as
+possible from a problematic (i.e. damaged sectors) source - like floppy drives,
+hard disk partitions, CDs, tape devices, ..., where other tools like dd would
+fail due to I/O errors.
 </h2>
+<p>Safecopy includes a low level IO layer to read CDROM disks in raw mode, and
+issue device resets and other helpful low level operations on a number of
+other device classes.</p> <p>The project also includes a <i>device
+simulator</i> which can be used to simulate bad media for testing and
+benchmarking safecopy as well as other data rescue tools. This <a
+href="analysis/analysis.html">article (Statistical analysis of damaged data
+storage media read timings)</a> covers the theoretical background and methods
+for gathering statistics on to be simulated media.</p>
 <h3>News:</h3>
 <p>
-2009-07-19:
+2009-07-28:
 <br>
-Safecopy now supports generic hardware access with O_DIRECT, as well as reading
-from /dev/raw devices. Direct IO is enabled with the --sync option.  For this
-it was necessary to align the main read buffer with the blocksize address
-boundary, so DMA transfers to the read buffer are possible, bypassing CPU-based
-in-memory copying by the kernel.
+Safecopy now supports generic direct hardware access with O_DIRECT, as well as
+reading from /dev/raw devices. Direct IO is enabled with the --sync option.
+For this it was necessary to align the main read buffer with the blocksize
+address boundary, so DMA transfers to the read buffer are possible, bypassing
+CPU-based in-memory copying by the kernel.
 <br>
-The --debug switch, present since about safecopy 1.3, has now been documented, and a new switch -T &lt;timingfile&gt; will generate a statistics file with the read timing information in microseconds for each read block. This is usefull for statistical analysis of bad hardware behaviour and finding strategies to speed up recovery tools like safecopy, ddrescue and the like.<br>
-Read <a href="analysis.html"/>Analysis of damaged hardware statistics</a> for more information about what this is good for.
+The --debug switch, present since about safecopy 1.3, has now been documented,
+and a new switch -T &lt;timingfile&gt; will generate a statistics file with the
+read timing information in microseconds for each read block. This is useful
+for statistical analysis of bad hardware behaviour and finding strategies to
+speed up recovery tools like safecopy, ddrescue and the like.<br> Read <a
+href="analysis/analysis.html"/>Statistical analysis of damaged data storage
+media read timings</a> for more information about what this is good for.
 </p>
 <p>
 2009-07-15:
@@ -55,16 +71,24 @@ over all parameters and full predictability of behaviour.
 2009-04-13:
 <br>
 Fixes in low level data recovery from CDROM and DVD code.
-<br>Raw sector reading is not possible on DVDs, but DVDs had been incorrectly detected as CDs leading to failures on low level access.
-DVDs are now detected successfully and offer a drive reset as the only low level operation.
 <br>
-The type of a CD (Audio, Mode1, Mode2, etc...) is now successfully detected, and sector alignments are calculated correctly. Since its not possible with reasonable overhead to calculate sector addressing on Mixed-mode CDs (since the sector sizes can change with each track) safecopy does not attempt to raw read from these anymore. Device reset will still be attempted if necessary.
+Raw sector reading is not possible on DVDs, but DVDs had been incorrectly
+detected as CDs leading to failures on low level access.  DVDs are now detected
+successfully and offer a drive reset as the only low level operation.
+<br>
+The type of a CD (Audio, Mode1, Mode2, etc...) is now successfully detected,
+and sector alignments are calculated correctly. Since its not possible with
+reasonable overhead to calculate sector addressing on Mixed-mode CDs (since the
+sector sizes can change with each track) safecopy does not attempt to raw read
+from these anymore. Device reset will still be attempted if necessary.
 <br>
 Device resets will now only be issued in case of previous read errors.
 <br>
-The "twaddle" system call is now supported on floppy drives to potentially aid in data resurrection.
+The "twaddle" system call is now supported on floppy drives to potentially aid
+in data resurrection.
 <br>
-Safecopy has now a manpage, which includes basically all the information of the README file in more standardized format.
+Safecopy has now a manpage, which includes basically all the information of the
+README file in more standardized format.
 </p>
 
 <p>
@@ -77,7 +101,10 @@ Safecopy has now a manpage, which includes basically all the information of the 
 <p>
 <a href="http://sourceforge.net/project/showfiles.php?group_id=141056&package_id=154761">safecopy download page (SF)</a>
 </p>
-<p>Project by Corvus Corax (corvuscorax&lt;at&gt;cybertrench.com) - distributed under the <a href="http://www.gnu.org/copyleft/gpl.html">GPL</a> (v2 or higher)</p>
+<p>Project by Corvus Corax (corvuscorax&lt;at&gt;cybertrench.com) - distributed
+under the <a href="http://www.gnu.org/copyleft/gpl.html">GPL</a>
+(v2 or higher)
+</p>
 <pre>
 Safe copying of files and partitions.
 
@@ -500,7 +527,7 @@ Options:
 	              Blocks not in the -I file, or covered by the file
 	              specified with -X are save from being overwritten.
 	              Default: none
-	--debug &lt;level&gt; : Enable debug output. Level is a bitfield,
+	--debug &lt;level&gt; : Enable debug output. Level is a bit field,
 	                  add values together for more information:
 	                     program flow:     1
 	                     IO control:       2
