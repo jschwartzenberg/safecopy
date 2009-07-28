@@ -18,7 +18,7 @@ fi
 if [ ! -e "$disk/simulator.cfg" ]; then
 	echo "Error: $disk does not contain a simulator.cfg file with data on how to simulate a device.
  Usage:
- $0 <disk>
+$0 <disk>
  <disk> is one of the subdirectories including a simulator.cfg file set up to simulate your specific hardware.
  Example:
 $0 floppy
