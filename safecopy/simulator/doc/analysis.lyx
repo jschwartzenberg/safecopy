@@ -391,7 +391,7 @@ lly had purposely made deep scratches on both the front and backside of
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -422,7 +422,7 @@ CDROM top.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -527,7 +527,7 @@ This drive is handling scratches on the front-side of the media badly, unable
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -628,7 +628,7 @@ This drive performs significantly better in terms of reading from problematic
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -713,7 +713,7 @@ While hopelessly outdated, any old floppy disks still around are by now
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -762,7 +762,7 @@ Sector size of this medium is 512 byte, stored in IBM AT 1.2 MB 80 track
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -841,7 +841,7 @@ SATA and PATA hard disks of different capacity are among the most common
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -888,7 +888,7 @@ This drive had been removed from a laptop after sector read errors occurred.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -928,7 +928,7 @@ As one can see, similar to the behavior of CD-ROMS, the drive firmware reduces
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1568,7 +1568,7 @@ Data source for this example is the above mentioned KNOPPIX CD read on the
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1608,7 +1608,7 @@ simplified media timing characteristics
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1649,7 +1649,7 @@ Simulating this disk, using the safecopy test debug library, measuring sector
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1713,7 +1713,7 @@ reasonable similarity
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1768,7 +1768,7 @@ The same CD in a LightOn drive:
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1799,7 +1799,7 @@ Original.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1834,7 +1834,7 @@ Simplified media timing characteristics
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1865,7 +1865,7 @@ Simulation.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1908,7 +1908,7 @@ Data source is the above analyzed 5¼
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1939,7 +1939,7 @@ Read timings on the original disk.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -1972,7 +1972,7 @@ Simplified media timing characteristics.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -2003,7 +2003,7 @@ Simulation.
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -2126,7 +2126,7 @@ Doing a forced seek over the whole disk (on the Dell drive) with a sparse
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
@@ -2162,7 +2162,7 @@ After setting up the simulator to delay to 649 nanoseconds per seeked sector,
 
 \begin_layout Standard
 \begin_inset Float figure
-placement h
+placement H
 wide false
 sideways false
 status open
