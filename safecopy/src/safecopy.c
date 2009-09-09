@@ -1148,12 +1148,12 @@ int main(int argc, char ** argv) {
 				// if so, proceed as usual,
 				// otherwise seek to the next badblock in input
 				tmp_pos=(readposition+startoffset)/iblocksize;
-				if (tmp_pos>lastsourceblock) {
-					tmp=NULL;
-					do {
+				if (tmp_pos!=lastsourceblock) {
+					tmp=textbuffer;
+					while (tmp!=NULL && lastsourceblock<tmp_pos ) {
 						tmp=fgets(textbuffer,64,bblocksin);
 						if (sscanf(textbuffer,"%llu",&lastsourceblock)!=1) tmp=NULL;
-					} while (tmp!=NULL && lastsourceblock<tmp_pos );
+					}
 					if (tmp==NULL) {
 						// no more bad blocks in input file
 						// if exists
