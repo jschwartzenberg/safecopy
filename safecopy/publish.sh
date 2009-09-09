@@ -55,9 +55,9 @@ tar -zxf "${dir}.tar.gz" || exit
 cd "$dir"
 
 echo "building..."
-configure && make || exit
+./configure && make || exit
 cd simulator
-configure && make || exit
+./configure && make || exit
 cd ..
 
 echo "testing"
