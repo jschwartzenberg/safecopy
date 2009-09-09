@@ -59,3 +59,6 @@
 - Added documentation for simulation benchmark creation.
 - Moved test library in source tree and renamed to "simulator".
 - Added benchmarking subproject.
+
+2009.09.09
+- Fixed a bug with badblock include file handling ( ID: 2854324 )
