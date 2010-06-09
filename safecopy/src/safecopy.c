@@ -1676,5 +1676,11 @@ int main(int argc, char ** argv) {
 	if (bblocksoutfile!=NULL) close(bblocksout);
 	if (timingfile!=NULL) fclose(timingfile);
 	arglist_kill(carglist);
+	if (wantabort) {
+		return(2);
+	}
+	if (damagesize>0) {
+		return(1);
+	}
 	return(0);
 }
