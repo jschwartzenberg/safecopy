@@ -9,7 +9,7 @@
 #include <sys/types.h>
 // if we don't have linux, the used ioctrls will be different
 // use a dummy read function that uses high lvl operations
-off_t read_desperately(char* filename, int *fd, unsigned char* buffer,
+off_t read_desperately(char* filename, int *fd, char* buffer,
 			off_t position, off_t length,
 			int seekable, int recovery, int syncmode) {
 	off_t retval;

@@ -45,6 +45,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include "arglist.h"
+#include "lowlevel.h"
 
 // define syncmode - use O_DIRECT if supported
 #ifdef O_DIRECT
@@ -507,6 +508,7 @@ void markbadblocks(int destination , off_t writeposition , off_t remain , char* 
 		if ( cposition < 0) {
 			fprintf(stderr, "\nError: seek() in output failed");
 			perror(" ");
+			wantabort = 2;
 			return;
 		}
 		debug(DEBUG_IO, "debug: writing badblock marker to destination file: %llu bytes at %llu\n", writeremain , cposition );
@@ -514,6 +516,7 @@ void markbadblocks(int destination , off_t writeposition , off_t remain , char* 
 		if ( writeblock <= 0) {
 			fprintf(stderr, "\nError: write to output failed");
 			perror(" ");
+			wantabort = 2;
 			return;
 		}
 		writeremain -= writeblock ;
@@ -576,6 +579,7 @@ void realmarkoutput(
 				if (statusvars->xblocksin == NULL) {
 					fprintf(stderr, "Error reopening exclusion badblock file for reading: %s", configvars->xblocksinfile);
 					perror(" ");
+					wantabort = 2;
 					statusvars->previousxblock = ((unsigned)-1)>>1;
 					statusvars->lastxblock = ((unsigned)-1)>>1;
 					return;
@@ -609,6 +613,7 @@ void realmarkoutput(
 // ATTENTION: there could be a reamaining part behind this xblock - needs two recursive calls to self to fix!
 					debug(DEBUG_EXCLUDE, "debug: current bad block area is partially covered by xblocks, splitting\n");
 					realmarkoutput(first, tmp_pos, first- statusvars->startoffset , tmp_pos- statusvars->startoffset , configvars, statusvars);
+					if (wantabort>1) return;
 					realmarkoutput(tmp_pos, last, tmp_pos- statusvars->startoffset , last- statusvars->startoffset , configvars, statusvars);
 					return;
 				} else {
@@ -620,6 +625,11 @@ void realmarkoutput(
 				tmp = fgets( statusvars->textbuffer , 64, statusvars->xblocksin);
 				long long unsigned int dummy;
 				if (sscanf( statusvars->textbuffer , "%llu", &dummy) != 1) tmp = NULL;
+				if ( tmp!=NULL && (signed)dummy < (signed)statusvars->lastxblock ) {
+					fprintf(stderr, "Parse error in badblocks file %s: not sorted correctly!\n", configvars->xblocksinfile);
+					wantabort = 2;
+					return;
+				}
 				tmp_pos = dummy;
 				if (tmp == NULL) {
 					// no more bad blocks in input file
@@ -666,6 +676,7 @@ char* description, off_t readposition , off_t lastgood ,
 			if (inc_pos+ statusvars->iblocksize > tmp_pos) {
 				debug(DEBUG_BADBLOCKS, "debug: %s %llu - %llu - marking output for infile block %lli (%llu - %llu)\n", description, tmp_pos, readposition + statusvars->startoffset , inc_pos/ statusvars->iblocksize , inc_pos, inc_pos+ statusvars->iblocksize );
 				realmarkoutput(inc_pos, inc_pos+ statusvars->iblocksize , lastgood , readposition , configvars, statusvars);
+				if (wantabort>1) return;
 			}
 			if (inc_pos+ statusvars->iblocksize > readposition + statusvars->startoffset ) {
 				// do not read in another include block
@@ -675,6 +686,11 @@ char* description, off_t readposition , off_t lastgood ,
 			tmp = fgets( statusvars->textbuffer , 64, statusvars->bblocksin);
 			long long unsigned int dummy;
 			if (sscanf( statusvars->textbuffer , "%llu", &dummy ) != 1) tmp = NULL;
+			if ( tmp!=NULL && (signed)dummy < (signed)statusvars->lastsourceblock ) {
+				fprintf(stderr, "Parse error in badblocks file %s: not sorted correctly!\n", configvars->bblocksinfile);
+				wantabort = 2;
+				return;
+			}
 			statusvars->lastsourceblock = dummy;
 			if (tmp == NULL) {
 				// no more bad blocks in input file
@@ -740,10 +756,10 @@ int main(int argc, char ** argv) {
 	global_configuration.xblocksinstring = DEFEXCLBB;
 	global_configuration.failuredefstring = DEFFAILSTRING;
 	global_configuration.timingfilestring = DEFTIMINGFILESTRING; 
-	global_configuration. retriesdef = DEFRETRIES;
-	global_configuration. headmovedef = DEFHEADMOVE;
-	global_configuration. lowleveldef = DEFLOWLEVEL;
-	global_configuration. human = 0;
+	global_configuration.retriesdef = DEFRETRIES;
+	global_configuration.headmovedef = DEFHEADMOVE;
+	global_configuration.lowleveldef = DEFLOWLEVEL;
+	global_configuration.human = 0;
 	global_configuration.marker = NULL;
 	struct config_struct *configvars = &global_configuration; 
 	
@@ -1114,7 +1130,12 @@ int main(int argc, char ** argv) {
 		}
 	}
 	if (configvars->bblocksoutfile != NULL) {
-		statusvars->bblocksout = open(configvars->bblocksoutfile, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+		// append sectors to badblocks file if in incremental mode
+		if (statusvars->incremental == 1) {
+			statusvars->bblocksout = open(configvars->bblocksoutfile, O_WRONLY | O_APPEND | O_CREAT, 0666);
+		} else {
+			statusvars->bblocksout = open(configvars->bblocksoutfile, O_WRONLY | O_TRUNC | O_CREAT, 0666);
+		}
 		if (statusvars->bblocksout == -1) {
 			close(statusvars->source);
 			close(statusvars->destination);
@@ -1129,7 +1150,7 @@ int main(int argc, char ** argv) {
 
 	statusvars->timingfile = NULL;
 	if (configvars->timingfilestring != NULL) {
-		statusvars->timingfile = fopen(configvars->timingfilestring, "w");
+		statusvars->timingfile = fopen(configvars->timingfilestring, "a");
 		if (statusvars->timingfile == NULL) {
 			close(statusvars->source);
 			close(statusvars->destination);
@@ -1196,13 +1217,7 @@ int main(int argc, char ** argv) {
 		statusvars->source = open(configvars->sourcefile, O_RDONLY | O_NONBLOCK | statusvars->syncmode );
 		if (statusvars->source == -1) {
 			perror("Error reopening sourcefile after external seek ");
-			close(statusvars->destination);
-			if ( statusvars->incremental == 1) fclose(statusvars->bblocksin);
-			if ( statusvars->excluding == 1) fclose(statusvars->xblocksin);
-			if (configvars->bblocksoutfile != NULL) close(statusvars->bblocksout);
-			if (statusvars->timingfile != NULL) fclose(statusvars->timingfile);
-			arglist_kill(carglist);
-			return 2;
+			wantabort = 2;
 		}
 		fprintf(stdout, "|/|");
 	} else {
@@ -1239,8 +1254,14 @@ int main(int argc, char ** argv) {
 						tmp = fgets( statusvars->textbuffer , 64, statusvars->bblocksin);
 						long long unsigned int dummy;
 						if (sscanf( statusvars->textbuffer , "%llu", &dummy ) != 1) tmp = NULL;
+						if ( tmp!= NULL && (signed)dummy < (signed)statusvars->lastsourceblock ) {
+							fprintf(stderr, "Parse error in badblocks file %s: not sorted correctly!\n", configvars->bblocksinfile);
+							wantabort = 2;
+							break;
+						}
 						statusvars->lastsourceblock = dummy;
 					}
+					if (wantabort) break;
 					if (tmp == NULL) {
 						// no more bad blocks in input file
 						// if exists
@@ -1286,7 +1307,7 @@ int main(int argc, char ** argv) {
 						statusvars->excluding = 0;
 						fprintf(stderr, "Error reopening exclusion badblock file for reading: %s", configvars->xblocksinfile);
 						perror(" ");
-						wantabort = 1;
+						wantabort = 2;
 						break;
 					}
 					statusvars->lastxblock = -1;
@@ -1335,6 +1356,11 @@ int main(int argc, char ** argv) {
 					tmp = fgets( statusvars->textbuffer , 64, statusvars->xblocksin);
 					long long unsigned int dummy;
 					if (sscanf( statusvars->textbuffer , "%llu", &dummy) != 1) tmp = NULL;
+					if ( tmp!=NULL && (signed)dummy < (signed)statusvars->lastxblock ) {
+						fprintf(stderr, "Parse error in badblocks file %s: not sorted correctly!\n", configvars->xblocksinfile);
+						wantabort = 2;
+						break;
+					}
 					tmp_pos = dummy;
 					if (tmp == NULL) {
 						// no more bad blocks in input file
@@ -1351,6 +1377,7 @@ int main(int argc, char ** argv) {
 				continue;
 			}
 		}
+		if (wantabort) break;
 
 // 6.b navigation - attempt to seek to requested input file position and find out actual position
 
@@ -1394,13 +1421,8 @@ int main(int argc, char ** argv) {
 						statusvars->source = open(configvars->sourcefile, O_RDONLY | O_NONBLOCK | statusvars->syncmode );
 						if (statusvars->source == -1) {
 							perror("\nError reopening sourcefile after external seek ");
-							close(statusvars->destination);
-							if ( statusvars->incremental == 1) fclose(statusvars->bblocksin);
-							if ( statusvars->excluding == 1) fclose(statusvars->xblocksin);
-							if (configvars->bblocksoutfile != NULL) close(statusvars->bblocksout);
-							if (statusvars->timingfile != NULL) fclose(statusvars->timingfile);
-							arglist_kill(carglist);
-							return 2;
+							wantabort = 2;
+							break;
 						}
 						if ( statusvars->cposition >= 0) {
 							statusvars->sposition = statusvars->cposition ;
@@ -1573,28 +1595,16 @@ int main(int argc, char ** argv) {
 					if ( statusvars->cposition < 0) {
 						fprintf(stderr, "\nError: seek() in %s failed", configvars->destfile);
 						perror(" ");
-						close(statusvars->destination);
-						close(statusvars->source);
-						if ( statusvars->incremental == 1) fclose(statusvars->bblocksin);
-						if ( statusvars->excluding == 1) fclose(statusvars->xblocksin);
-						if (configvars->bblocksoutfile != NULL) close(statusvars->bblocksout);
-						if (statusvars->timingfile != NULL) fclose(statusvars->timingfile);
-						arglist_kill(carglist);
-						return 2;
+						wantabort = 2;
+						break;
 					}
 					debug(DEBUG_IO, "debug: writing data to destination file: %llu bytes at %llu\n", statusvars->writeremain , statusvars->cposition );
 					statusvars->writeblock = write(statusvars->destination, statusvars->databuffer +writeoffset, statusvars->writeremain );
 					if ( statusvars->writeblock <= 0) {
 						fprintf(stderr, "\nError: write to %s failed", configvars->destfile);
 						perror(" ");
-						close(statusvars->destination);
-						close(statusvars->source);
-						if ( statusvars->incremental == 1) fclose(statusvars->bblocksin);
-						if ( statusvars->excluding == 1) fclose(statusvars->xblocksin);
-						if (configvars->bblocksoutfile != NULL) close(statusvars->bblocksout);
-						if (statusvars->timingfile != NULL) fclose(statusvars->timingfile);
-						arglist_kill(carglist);
-						return 2;
+						wantabort = 2;
+						break;
 					}
 					statusvars->writeremain -= statusvars->writeblock ;
 					writeoffset += statusvars->writeblock ;
@@ -1671,6 +1681,8 @@ int main(int argc, char ** argv) {
 
 			}
 
+			if (wantabort) break;
+
 // 6.f.2.c close and reopen source file
 			// reopen source file to clear possible error flags preventing us from getting more data
 			close(statusvars->source);
@@ -1697,19 +1709,14 @@ int main(int argc, char ** argv) {
 				if (wantabort) break;
 			}
 			statusvars->source = open(configvars->sourcefile, O_RDONLY | O_NONBLOCK | statusvars->syncmode );
-			while (statusvars->source == -1 && ( errno == EAGAIN || errno == ENOENT || errno == ENXIO ) && !wantabort ) {
+			while (statusvars->source == -1 && statusvars->forceopen && !wantabort ) {
 			 	sleep(1);
 				statusvars->source = open(configvars->sourcefile, O_RDONLY | O_NONBLOCK | statusvars->syncmode );
 			}
 			if (statusvars->source == -1) {
 				perror("\nError reopening sourcefile after read error ");
-				close(statusvars->destination);
-				if ( statusvars->incremental == 1) fclose(statusvars->bblocksin);
-				if ( statusvars->excluding == 1) fclose(statusvars->xblocksin);
-				if (configvars->bblocksoutfile != NULL) close(statusvars->bblocksout);
-				if (statusvars->timingfile != NULL) fclose(statusvars->timingfile);
-				arglist_kill(carglist);
-				return 2;
+				wantabort = 2;
+				break;
 			}
 			if ( statusvars->seekable ) {
 				// in seekable input, a re-opening sets the pointer to zero
@@ -1732,15 +1739,19 @@ int main(int argc, char ** argv) {
 		sprintf( statusvars->textbuffer , "}[%llu](+%llu)", (long long)tmp_pos, (long long)tmp_bytes);
 		write(1, statusvars->textbuffer , strlen( statusvars->textbuffer ));
 		if (configvars->human) write(2, &"\n", 1);
-		// mark badblocks in output if not aborted manually
-		if ( statusvars->filesize && statusvars->lastgood + statusvars->startoffset < statusvars->filesize && statusvars->readposition + statusvars->startoffset >= statusvars->filesize ) {
-			markoutput("end of file - filling to filesize", statusvars->filesize, statusvars->lastgood, configvars, statusvars);
-		} else {
-			markoutput("end of file - filling to last seen position", statusvars->readposition + statusvars->startoffset, statusvars->lastgood, configvars, statusvars);
+		// mark badblocks in output if not aborted because of error
+		if (wantabort<2) {
+			if ( statusvars->filesize && statusvars->lastgood + statusvars->startoffset < statusvars->filesize && statusvars->readposition + statusvars->startoffset >= statusvars->filesize ) {
+				markoutput("end of file - filling to filesize", statusvars->filesize, statusvars->lastgood, configvars, statusvars);
+			} else {
+				markoutput("end of file - filling to last seen position", statusvars->readposition + statusvars->startoffset, statusvars->lastgood, configvars, statusvars);
+			}
 		}
 	}
-	if (wantabort) {
+	if (wantabort==1) {
 		fprintf(stdout, "\nAborted by user request!\n");
+	} else if (wantabort>1) {
+		fprintf(stdout, "\nAborted because of error!\n");
 	} else {
 		fprintf(stdout, "\nDone!\n");
 	}
