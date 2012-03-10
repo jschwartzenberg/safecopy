@@ -1,4 +1,4 @@
-.TH SAFECOPY 1 2009-05-27 "" "SAFECOPY"
+.TH SAFECOPY 1 2012-03-10 "" "SAFECOPY"
 
 .SH NAME
 .BR safecopy 
@@ -95,26 +95,20 @@ specification.txt shipped with safecopy.
 Preset to rescue most of the data fast,
 using no retries and avoiding bad areas.
 .IP
-\fBPresets\fR: -f 10% -r 10% -R 1 -Z 0 -L 2 -M BaDbLoCk \\
-.br
--o stage1.badblocks
+\fBPresets\fR: -f 10% -r 10% -R 1 -Z 0 -L 2 -M BaDbLoCk -o stage1.badblocks
 .TP
 \fB\-\-stage2\fR
 Preset to rescue more data, using no retries
 but searching for exact ends of bad areas.
 .IP
-\fBPresets\fR: -f 128* -r 1* -R 1 -Z 0 -L 2 \\
-.br
--I stage1.badblocks -o stage2.badblocks
+\fBPresets\fR: -f 128* -r 1* -R 1 -Z 0 -L 2 -I stage1.badblocks -o stage2.badblocks
 .TP
 \fB\-\-stage3\fR
 Preset to rescue everything that can be rescued
 using maximum retries, head realignment tricks
 and low level access.
 .IP
-\fBPresets\fR: -f 1* -r 1* -R 4 -Z 1 -L 2 \\
-.br
--I stage2.badblocks -o stage3.badblocks
+\fBPresets\fR: -f 1* -r 1* -R 4 -Z 1 -L 2 -I stage2.badblocks -o stage3.badblocks
 .PP
 All stage presets can be overridden by individual options.
 .TP
@@ -187,6 +181,15 @@ Safecopy will use O_DIRECT if supported by the OS and O_SYNC otherwise.
 .IP
 \fBDefault\fR: Asynchronous read buffering by the OS is allowed
 .TP
+\fB\-\-forceopen\fR
+Keep trying to reopen the source after a read errer
+useful for USB drives that go away temporarily.
+.IP
+\fBWarning\fR:
+This can cause safecopy to hang until aborted manually!
+.IP
+\fBDefault\fR:  Abort on fopen() error
+.TP
 \fB\-s\fR <\fIblocks\fR>
 Start position where to start reading.
 Will correspond to position 0 in the destination file.
@@ -208,12 +211,27 @@ Without this option, the destination file will be emptied prior to writing.
 Use \-I /dev/null if you want to continue a previous run of safecopy without a
 badblock list.
 .IP
-\fBDefault\fR: none
+\fBImplies\fR: \-c 0 if \-c is not specified
+.IP
+\fBDefault\fR: none ( /dev/null if -c is given )
 .TP
 \fB\-i\fR <\fIbytes\fR>
 Blocksize to interpret the badblockfile given with \-I.
 .IP
 \fBDefault\fR: Blocksize as specified by \-b
+.TP
+\fB\-c\fR <\fIblocks\fR>
+Continue copying at this position.
+This allows continuing if the output is a block device
+with a fixed size as opposed to a growable file,
+where safecopy cannot determine how far it already got.
+The blocksize used is the same as for the -I option.
+.br
+\-c 0 will continue at the current destination size.
+.IP
+\fBImplies\fR: \-I /dev/null if \-I is not specified
+.IP
+\fBDefault\fR: none ( 0 if \-I is given )
 .TP
 \fB\-X\fR <\fIbadblockfile\fR>
 Exclusion mode. If used together with \-I, excluded blocks override included
@@ -660,8 +678,11 @@ If the data is really important, go to a professional data recovery specialist
 right away, before doing further damage to the drive.
 
 .SH "EXIT STATUS"
-safecopy always returns 0 (zero) regardless of success rate and/or aborted
-execution.
+safecopy returns 0 (zero) if there were no unrecoverable errors.
+.br
+safecopy returns 1 if some data could not be recovered.
+.br
+safecopy returns 2 in case the copying was aborted due to error or signal.
 
 .SH AUTHORS
 safecopy and its manpage have been designed and written by CorvusCorax.
@@ -675,7 +696,8 @@ development if you encounter bugs or want to contribute to safecopy.
 Copyright \(co 2009 CorvusCorax
 .br
 This is free software.  You may redistribute copies of it under the terms of
-the GNU General Public License <http://www.gnu.org/licenses/gpl.html>.
+the GNU General Public License version 2 or above.
+<http://www.gnu.org/licenses/gpl.html>.
 There is NO WARRANTY, to the extent permitted by law.
 
 .SH "SEE ALSO"
