@@ -31,6 +31,15 @@ cp webpage/analysis.pdf simulator/doc/
 echo "removing webpage"
 rm -rf webpage
 
+echo "building tarball for extras"
+cd ..
+tar -czvhf "${dir}-extras.tar.gz" "$dir/benchmark" "$dir/simulator/doc"
+cd "$dir"
+
+echo "remove extras"
+rm -rf simulator/doc
+rm -rf benchmark
+
 echo "creating configure script..."
 ./autogen.sh || exit
 cd simulator
