@@ -307,7 +307,7 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive.
 
 
-Safecopy 1.5 by CorvusCorax
+Safecopy 1.7 by CorvusCorax
 Usage: safecopy [options] <source> <target>
 Options:
 	--stage1 : Preset to rescue most of the data fast,
@@ -370,6 +370,11 @@ Options:
 	         Safecopy will use O_DIRECT if supported by the OS
 	         and O_SYNC otherwise.
 	         Default: Asynchronous read buffering by the OS is allowed
+	--forceopen : Keep trying to reopen the source after a read errer
+	              useful for USB drives that go away temporarily.
+	              Warning: This can cause safecopy to hang
+	                       until aborted manually!
+	              Default: Abort on fopen() error
 	-s <blocks> : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
 	              Default: block 0
@@ -387,6 +392,14 @@ Options:
 	                    Default: none
 	-i <bytes> : Blocksize to interpret the badblockfile given with -I.
 	             Default: Blocksize as specified by -b
+	-c <blocks> : Continue copying at this position.
+	              This allows continuing if the output is a block device
+	              with a fixed size as opposed to a growable file,
+	              where safecopy cannot determine how far it got.
+	              The blocksize used is the same as for the -I option.
+	              Implies -I /dev/null if -I is not specified.
+	              Default: 0 if -I is not specified or
+	                       size of existing output file if -I is specified.
 	-X <badblockfile> : Exclusion mode. If used together with -I,
 	                    excluded blocks override included blocks.
 	                    Safecopy will not read or write any data from
@@ -459,7 +472,7 @@ Description of output:
 	}[xx](+yy) : current block and number of bytes of recent
 	             continuous unreadable data.
 
-Copyright 2009 CorvusCorax
+Copyright 2012 CorvusCorax
 This is free software. You may redistribute copies of it under
 the terms of the GNU General Public License version 2 or above.
 	<http://www.gnu.org/licenses/gpl2.html>.

@@ -62,3 +62,10 @@
 
 2009.09.09
 - Fixed a bug with badblock include file handling ( ID: 2854324 )
+
+2012.03.10
+- New --forceopen option to wait for removable drives to come back
+- New -c (continue) option to resume when copying directly unto devices
+- Return codes:  (0 for success, 2 for abort/ error, 1 for incomplete copy)
+- Adapted test suite to test for these return codes
+- Code cleanup
