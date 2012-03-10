@@ -260,7 +260,7 @@ void usage(char * name, FILE* printout) {
 	fprintf(printout, "	              The blocksize used is the same as for the -I option.\n");
 	fprintf(printout, "	              -c 0 will continue at the current destination size.\n");
 	fprintf(printout, "	              Implies: -I /dev/null if -I is not specified\n");
-	fprintf(printout, "	              Default: none, 0 if \-I is specified\n");
+	fprintf(printout, "	              Default: none, 0 if -I is specified\n");
 	fprintf(printout, "	-X <badblockfile> : Exclusion mode. If used together with -I,\n");
 	fprintf(printout, "	                    excluded blocks override included blocks.\n");
 	fprintf(printout, "	                    Safecopy will not read or write any data from\n");
