@@ -389,22 +389,23 @@ Options:
 	                    will be emptied prior to writing.
 	                    Use -I /dev/null if you want to continue a previous
 	                    run of safecopy without a badblock list.
-	                    Default: none
+	                    Implies: -c 0 if -c is not specified
+	                    Default: none ( /dev/null if -c is given )
 	-i <bytes> : Blocksize to interpret the badblockfile given with -I.
 	             Default: Blocksize as specified by -b
 	-c <blocks> : Continue copying at this position.
 	              This allows continuing if the output is a block device
 	              with a fixed size as opposed to a growable file,
-	              where safecopy cannot determine how far it got.
+	              where safecopy cannot determine how far it already got.
 	              The blocksize used is the same as for the -I option.
-	              Implies -I /dev/null if -I is not specified.
-	              Default: 0 if -I is not specified or
-	                       size of existing output file if -I is specified.
+	              -c 0 will continue at the current destination size.
+	              Implies: -I /dev/null if -I is not specified
+	              Default: none, 0 if -I is specified
 	-X <badblockfile> : Exclusion mode. If used together with -I,
 	                    excluded blocks override included blocks.
 	                    Safecopy will not read or write any data from
 	                    areas covered by exclude blocks.
-	                    Default: none
+	                    Default: none ( 0 if -I is given ) 
 	-x <bytes> : Blocksize to interpret the badblockfile given with -X.
 	             Default: Blocksize as specified by -b
 	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.
