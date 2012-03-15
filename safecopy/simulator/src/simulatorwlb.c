@@ -9,7 +9,7 @@
 #define _GNU_SOURCE
 #endif
 
-#define CONFIGFILE "simulator.cfg"
+#define CONFIGFILE "simulatorw.cfg"
 #define MAXLIST 1000000
 
 #include <dlfcn.h>
@@ -31,13 +31,15 @@
 static int (*realopen)(const char*,int, ...);
 static int (*realclose)(int);
 static off_t (*reallseek)(int,off_t,int);
-static ssize_t (*realread)(int,void*,size_t);
+static ssize_t (*realwrite)(int,const char*,size_t);
 static int (*realdup)(int);
 static int (*realdup2)(int,int);
 
 void _init(void);
 int open(const char*,int,...);
 int open64(const char*,int,...);
+int creat(const char*,mode_t);
+int creat64(const char*,mode_t);
 off_t lseek(int,off_t,int);
 off64_t lseek64(int,off64_t,int);
 ssize_t read(int,void*,size_t);
@@ -163,7 +165,7 @@ static inline void sectorsleep() {
 static void addtolist(struct timedata *array,int *count,struct timedata *value) {
 // insert value into sorted array of length *count
 	if (*count==MAXLIST) {
-		fprintf(stderr,"simulator error: cannot store any more sectors in list - out of hardcoded memory limit!\n");
+		fprintf(stderr,"simulatorw error: cannot store any more sectors in list - out of hardcoded memory limit!\n");
 		return;
 	}
 	if (!*count) {
@@ -249,7 +251,7 @@ static void readoptions() {
 	harderrors=0;
 	fd=fopen(CONFIGFILE,"r");
 	if (!fd) {
-		perror("simulator could not open config file "CONFIGFILE);
+		perror("simulatorw could not open config file "CONFIGFILE);
 		return;
 	}
 	gettimeofday(&starttime,NULL);
@@ -261,7 +263,7 @@ static void readoptions() {
 	gettimeofday(&endtime,NULL);
 	// granularity is set higher than it is by about 1/4
 	granularity=timediff()/7;
-	fprintf(stderr,"simulator time granularity: %lu usecs\nsimulator everything shorter will be busy-waiting\n",granularity);
+	fprintf(stderr,"simulatorw time granularity: %lu usecs\nsimulatorw everything shorter will be busy-waiting\n",granularity);
 
 	while (fgets(line,255,fd)) {
 		number=strchr(line,'=');
@@ -275,41 +277,41 @@ static void readoptions() {
 			tmp=0;
 			if (strcmp(line,"verbose")==0) {
 				sscanf(number,"%u",&verbosity);
-				fprintf(stderr,"simulator verbosity: %u\n",verbosity);
+				fprintf(stderr,"simulatorw verbosity: %u\n",verbosity);
 			} else if (strcmp(line,"blocksize")==0) {
 				sscanf(number,"%u",&blocksize);
-				if (verbosity) fprintf(stderr,"simulator simulated blocksize: %u\n",blocksize);
+				if (verbosity) fprintf(stderr,"simulatorw simulated blocksize: %u\n",blocksize);
 			} else if (strcmp(line,"filesize")==0) {
 				sscanf(number,"%u",&filesize);
-				if (verbosity) fprintf(stderr,"simulator simulated filesize: %u\n",filesize);
-			} else if (strcmp(line,"source")==0) {
+				if (verbosity) fprintf(stderr,"simulatorw simulated filesize: %u\n",filesize);
+			} else if (strcmp(line,"dest")==0) {
 				sscanf(number,"%s",filename);
-				if (verbosity) fprintf(stderr,"simulator opening data source: %s\n",filename);
+				if (verbosity) fprintf(stderr,"simulatorw opening data destination: %s\n",filename);
 			} else if (strcmp(line,"softfailcount")==0) {
 				sscanf(number,"%u",&softfailcount);
-				if (verbosity) fprintf(stderr,"simulator simulated soft error count: %u\n",softfailcount);
+				if (verbosity) fprintf(stderr,"simulatorw simulated soft error count: %u\n",softfailcount);
 			} else if (strcmp(line,"seekdelay")==0) {
 				sscanf(number,"%lu",&sectorsleeptime);
-				if (verbosity) fprintf(stderr,"simulator time to seek over 1000 sectors: %lu usec\n",sectorsleeptime);
+				if (verbosity) fprintf(stderr,"simulatorw time to seek over 1000 sectors: %lu usec\n",sectorsleeptime);
 			} else if (strcmp(line,"delay")==0) {
 				sscanf(number,"%lu",&slowsectordelay);
-				if (verbosity) fprintf(stderr,"simulator delay on any sectors: %lu usec\n",slowsectordelay);
+				if (verbosity) fprintf(stderr,"simulatorw delay on any sectors: %lu usec\n",slowsectordelay);
 			} else if (strcmp(line,"slow")==0) {
 				sscanf(number,"%llu %u",&tmp,&x.goodtime);
 				x.sector=tmp;
 				addtolist(slowsector,&slowsectors,&x);
-				if (verbosity) fprintf(stderr,"simulator simulating read difficulty in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulatorw simulating read difficulty in block: %llu\n",tmp);
 			} else if (strcmp(line,"softfail")==0) {
 				sscanf(number,"%llu %u %u",&tmp,&x.goodtime,&x.failtime);
 				x.sector=tmp;
 				addtolist(softerror,&softerrors,&x);
-				if (verbosity) fprintf(stderr,"simulator simulating soft error in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulatorw simulating soft error in block: %llu\n",tmp);
 				softerrorcount[softerrors]=0;
 			} else if (strcmp(line,"hardfail")==0) {
 				sscanf(number,"%llu %u",&tmp,&x.failtime);
 				x.sector=tmp;
 				addtolist(harderror,&harderrors,&x);
-				if (verbosity) fprintf(stderr,"simulator simulating hard error in block: %llu\n",tmp);
+				if (verbosity) fprintf(stderr,"simulatorw simulating hard error in block: %llu\n",tmp);
 			}
 		}
 	}
@@ -321,7 +323,7 @@ static inline void myprint(char* text) {
 	len=0;
 	if (!verbosity) return;
 	while ((char) *(text+len)) len++;
-	write(2,text,len);
+	realwrite(2,text,len);
 }
 
 static inline void myprinthex(unsigned int num) {
@@ -368,17 +370,16 @@ static inline void myprintint(unsigned int num) {
 		myprint(&buffer[pos]);
 	}
 }
-
 static void myinit(void) {
 	if (initialized) return;
 	initialized=1;
 	realopen=dlsym(RTLD_NEXT,"open");
 	realclose=dlsym(RTLD_NEXT,"close");
 	reallseek=dlsym(RTLD_NEXT,"lseek");
-	realread=dlsym(RTLD_NEXT,"read");
+	realwrite=dlsym(RTLD_NEXT,"write");
 	realdup=dlsym(RTLD_NEXT,"dup");
 	realdup2=dlsym(RTLD_NEXT,"dup2");
-	myprint("simulator initialising - reading config "CONFIGFILE"\n");
+	myprint("simulatorw initialising - reading config "CONFIGFILE"\n");
 	readoptions();
 }
 
@@ -390,24 +391,24 @@ static int myopen64(const char *pathname,int flags,...) {
 	myinit();
 	//va_list ap;
 	int fd;
-	int mode=0;
+	mode_t mode=0;
 	if (flags & O_CREAT) {
 		va_list ap;
 		va_start (ap,flags);
 		mode=va_arg(ap,int);
 		va_end(ap);
 	}
-	if (strcmp(pathname,"debug")==0) {
+	if (strcmp(pathname,"debugw")==0) {
 		if (descriptorcount) {
-			myprint("simulator open - file already openend, can't open twice!\n");
+			myprint("simulatorw open - file already openend, can't open twice!\n");
 			errno=ETXTBSY;
 			return -1;
 		}
-		int mydesc=realopen(filename,O_RDONLY);
+		int mydesc=realopen(filename,O_WRONLY | ( flags & O_CREAT ) | (flags & O_TRUNC),mode);
 		if (mydesc==-1) {
-			perror("simulator couldnt open source");
+			perror("simulatorw couldnt open destination");
 		} else {
-			myprint("opening debug\n");
+			myprint("opening debugw\n");
 		}
 		add_descriptor(mydesc);
 		return mydesc;
@@ -417,7 +418,7 @@ static int myopen64(const char *pathname,int flags,...) {
 }
 
 int open(const char *pathname, int flags, ...) {
-	int mode=0;
+	mode_t mode=0;
 	if (flags & O_CREAT) {
 		va_list ap;
 		va_start (ap,flags);
@@ -432,7 +433,7 @@ int __open_2(const char *pathname, int flags) {
 }
 
 int open64(const char *pathname,int flags,...) {
-	int mode=0;
+	mode_t mode=0;
 	if (flags & O_CREAT) {
 		va_list ap;
 		va_start (ap,flags);
@@ -442,15 +443,22 @@ int open64(const char *pathname,int flags,...) {
 	return myopen64(pathname,flags,mode);
 }
 
-
 int __open64_2(const char *pathname, int flags) {
 	return myopen64(pathname,flags);
+}
+
+int creat(const char *pathname, mode_t mode) {
+	return myopen64(pathname,O_CREAT,mode);
+}
+
+int creat64(const char *pathname, mode_t mode) {
+	return myopen64(pathname,O_CREAT,mode);
 }
 
 static int myclose(int fd) {
 	myinit();
 	if (is_in_descriptors(fd)) {
-		myprint("closing debug\n");
+		myprint("closing debugw\n");
 		rem_descriptor(fd);
 	}
 	return realclose(fd);
@@ -465,13 +473,13 @@ static off64_t mylseek64(int filedes, off64_t offset, int whence) {
 	off64_t newcurrent=0;
 	if ( is_in_descriptors(filedes) ) {
 		if (whence==SEEK_SET) {
-			myprint("seeking in debug: SEEK_SET to ");
+			myprint("seeking in debugw: SEEK_SET to ");
 			newcurrent=offset;
 		} else if (whence==SEEK_CUR) {
-			myprint("seeking in debug: SEEK_CUR to ");
+			myprint("seeking in debugw: SEEK_CUR to ");
 			newcurrent=current+offset;
 		} else if (whence==SEEK_END) {
-			myprint("seeking in debug: SEEK_END to ");
+			myprint("seeking in debugw: SEEK_END to ");
 			newcurrent=filesize+offset;
 		} else {
 			errno=EINVAL;
@@ -490,6 +498,7 @@ static off64_t mylseek64(int filedes, off64_t offset, int whence) {
 	return reallseek(filedes,offset,whence);
 }
 
+
 off_t lseek(int filedes, off_t offset, int whence) {
 	return mylseek64(filedes,offset,whence);
 }
@@ -498,7 +507,7 @@ off64_t lseek64(int filedes, off64_t offset, int whence) {
 	return mylseek64(filedes,offset,whence);
 }
 
-ssize_t read(int fd,void *buf,size_t count) {
+ssize_t write(int fd,const char *buf,size_t count) {
 	myinit();
 	ssize_t result;
 	int count1;
@@ -508,7 +517,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 	if ( is_in_descriptors(fd) ) {
 		gettimeofday(&starttime,NULL);
 		result=count;
-		myprint("reading from debug file: ");
+		myprint("writing to debugw file: ");
 		myprintint(count);
 		myprint(" at position ");
 		myprintint(current);
@@ -516,7 +525,7 @@ ssize_t read(int fd,void *buf,size_t count) {
 		if (current+count>filesize) {
 			result=filesize-current;
 			if (result<1) {
-				myprint(" reads zero!\n");
+				myprint(" writes zero!\n");
 				return 0;
 			}
 		}
@@ -578,17 +587,17 @@ ssize_t read(int fd,void *buf,size_t count) {
 			result=max-current;
 		}
 
-		result= realread(fd,buf,result);
+		result= realwrite(fd,buf,result);
 		current+=result;
-		// no sectorsleep in continuous read - thats already calculated in through statistics gathering
+		// no sectorsleep in continuous write - thats already calculated in through statistics gathering
 		oldcurrent=current;
-		myprint(" reads ");
+		myprint(" writes ");
 		myprintint(result);
 		myprint(" bytes\n");
 		dosleep();
 		return result;
 	}
-	return realread(fd,buf,count);
+	return realwrite(fd,buf,count);
 }
 
 static int mydup(int fd) {
@@ -596,7 +605,7 @@ static int mydup(int fd) {
 	int newfd=realdup(fd);
 	if (is_in_descriptors(fd)) {
 		add_descriptor(newfd);
-		myprint("duplicating debug\n");
+		myprint("duplicating debugw\n");
 	}
 	return newfd;
 }
@@ -610,7 +619,7 @@ static int mydup2(int fd,int wish) {
 	int newfd=realdup2(fd,wish);
 	if (is_in_descriptors(fd)) {
 		add_descriptor(newfd);
-		myprint("duplicating debug\n");
+		myprint("duplicating debugw\n");
 	}
 	return newfd;
 }
