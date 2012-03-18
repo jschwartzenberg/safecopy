@@ -3,13 +3,25 @@ Safe copying of files and partitions.
 Idea:
 
 A main problem with damaged storage hardware is, that once you get an
-unrecoverable IO error further reading from the file / device often fails until
-the file has been closed and re-opened.
+unrecoverable IO error further reading / writing from or to the file / device
+often fails until the file has been closed and re-opened. Even worse, drive
+resets on modern external hardware like USB sticks or USB disk drives may cause
+a renumeration on the bus, which effectively causes the device to disappear
+completely and come back under a different name altogether.
 
-The normal copy tools like cat, cp or dd do not allow creation of an image file
-from a disk or CD-ROM once reading of a sector failed.
+The normal copy tools like cat, or cp do not allow creation of an image file
+from a disk or CD-ROM once reading of a sector failed. "dd" at least can try to
+ignore read errors with the no-error option, but recovering data like that
+takes forever if more than a few sectors on a device are unreadable, and will
+not work if the device "disappears" temporarily.
 
-Safecopy tries to get as much data from the source as possible, even resorting
+No other common system tool is currently able to ignore write errors and resume
+writing on a damaged disk. This feature comes useful in a number of use cases,
+for example when personal data needs to be erased from a defective drive to be
+sent in for replacement, since any "more thorough" methods of erasing would
+void the warranty.
+
+Safecopy is designed to get as much data from the source as possible, even resorting
 to device specific low level operations if applicable.
 
 This is achieved by identifying problematic or damaged areas, skipping over
@@ -30,18 +42,24 @@ controlled skip over the damaged part for you.
 (For example by using "mt seek" and "mt tell" on an SCSI tape device)
 See the "-S <seekscript>" parameter for details.
 
+Writing data in case of write errors is less performant, since at this point no
+deliberate attempts to identify the characteristics of a bad area on the target
+device or file are made. A write error will simply be recorded in a badblock
+file, and the problematic block will be skipped over. This might improve in
+future versions of safecopy.
+
 Performance and success of this tool depend extremely on the device driver,
 firmware and underlying hardware.
 
 Currently safecopy supports RAW access to CDROM drives to read data directly of
 a CD, bypassing some driver dependant error correction. This can speed up data
-retrieval from CDs and reduce system load during recovery, as well as increase
-the success rate. Safecopy uses the disc status syscall to determine sector
-size and addressing of CDs. This fails on mixed-mode or multi-session CDs,
-since the sector layout can change within the disk, but would still work on the
-the big majority of disks. Other disks can still be recovered using normal high
-level data access. Safecopy auto-detects the disk type involved during the scan
-for disk and block size.
+retrieval from CDs and reduce system load during recovery, as well as
+increase the success rate. Safecopy uses the disc status syscall to
+determine sector size and addressing of CDs. This fails on mixed-mode or
+multi-session CDs, since the sector layout can change within the disk, but
+would still work on the big majority of disks. Other disks can still be
+recovered using normal high level data access. Safecopy auto-detects the
+disk type involved during the scan for disk and block size.
 
 Some CD/DVD drives are known to cause the ATAPI bus to crash on errors, causing
 the device driver to freeze for times up to and beyond a minute per error. Try
@@ -97,6 +115,10 @@ Different use cases:
 - create an filesystem image of a damaged disk/cdrom:
 	safecopy /dev/device ~/diskimage
 
+- make a test run without really reading data and without writing anything (to
+  test command line options):
+	safecopy --simulate source dest [options]
+
 - resurrect data as thoroughly as possible?
 	safecopy source dest -f 1* -R 8 -Z 2
 	(assuming logical misalignment of blocks to sectors)
@@ -135,6 +157,14 @@ Different use cases:
 	safecopy source dest -I /dev/null -o badblockfile
 	cat badblockfile >>savedbadblockfile
 
+- interrupt and later resume a data rescue operation with correct
+  badblocks output unto a partition:
+	safecopy source destdevice <options> -o badblockfile
+	<CTRL+C> (safecopy aborts)
+	mv badblockfile savedbadblockfile
+	safecopy source destdevice -c blockcount -o badblockfile
+	cat badblockfile >>savedbadblockfile
+
 - interrupt and resume in incremental mode:
         (this needs a bit of bash scripting to get the correct badblock lists)
 	safecopy source dest <options> -o badblockfile1
@@ -163,6 +193,30 @@ Different use cases:
 
 - create an image of a device that starts at X and is Y in size:
 	safecopy /dev/filesystem -b <bsize> -s <X/bsize> -l <Y/bsize>
+
+- overwrite a damaged disk device with zeroes:
+	safecopy /dev/zero /dev/device
+
+- overwrite a damaged disk device with random data:
+	safecopy /dev/urandom /dev/device
+
+- write a filesystem image unto a damaged partition and record non writeable
+  blocks in a list:
+	safecopy source /dev/filesystem -O badblocklist
+
+- copy data of a USB hard drive that "goes away" when it encounters an error:
+	Operating system specific:
+	You need to make sure the device comes back with the same name, on
+	linux this can be done with an udev rule like:
+    KERNEL=="sd?*", ATTRS{serial}=="?*", SYMLINK+="block-$attr{serial}-$number
+	Alternatively you could have a script automatically recreate a symlink
+	to the device whenever it comes back with a new name.
+	Then copy data from this device with
+	safecopy /dev/nameofsymlink dest --forceopen [other options]
+	The --forceopen option will cause safecopy to wait for the device to
+	reappear indefinitely. You could unplug a drive in the middle of a copy
+	process, put it into the fridge for an hour, then re plug it and let
+	safecopy continue.
 
 - combine two partial images of rescued data without access to the actual
   (damaged) source data:
@@ -307,7 +361,7 @@ FAQ:
 	!!! specialist right away, before doing further damage to the drive.
 
 
-Safecopy 1.7 by CorvusCorax
+Safecopy 1.8 by CorvusCorax
 Usage: safecopy [options] <source> <target>
 Options:
 	--stage1 : Preset to rescue most of the data fast,
@@ -375,6 +429,8 @@ Options:
 	              Warning: This can cause safecopy to hang
 	                       until aborted manually!
 	              Default: Abort on fopen() error
+	--simulate : Do not actually read or write, just pretend.
+	             Default: none
 	-s <blocks> : Start position where to start reading.
 	              Will correspond to position 0 in the destination file.
 	              Default: block 0
@@ -409,6 +465,9 @@ Options:
 	-x <bytes> : Blocksize to interpret the badblockfile given with -X.
 	             Default: Blocksize as specified by -b
 	-o <badblockfile> : Write a badblocks/e2fsck compatible bad block file.
+	                    Default: none
+	-O <badblockfile> : Same as -o but for errors encountered in
+	                    the output file.
 	                    Default: none
 	-S <seekscript> : Use external script for seeking in input file.
 	                  (Might be useful for tape devices and similar).
