@@ -1,7 +1,8 @@
 #Process this file with autoconf to produce a configure script.
 
-AC_INIT(configure.in)
-AM_INIT_AUTOMAKE(safecopy, 1.8)
+AC_INIT([safecopy], [1.8])
+AC_CONFIG_SRCDIR(configure.ac)
+AM_INIT_AUTOMAKE
 
 AC_PREREQ(2.5)
 #AC_ISC_POSIX
