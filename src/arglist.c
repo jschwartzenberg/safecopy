@@ -63,9 +63,7 @@ int arglist_equality (struct voidident *vfrst, struct voidident *vscnd) {
 /* ------------------------------------------------------------------- */
 
 int arglist_freecontent (struct voidident *videntity, struct voiddata *vdata){
-   char *identity;
    struct argdata *data;
-   identity=(char*)videntity;
    data=(struct argdata*)vdata;
 
    if (data->parameters!=NULL){
@@ -86,11 +84,9 @@ int arglist_freecontent (struct voidident *videntity, struct voiddata *vdata){
 
 int arglist_addtoknown (int number,struct voidident *videntity, struct voiddata *vdata, void* userdata) {
    char *identity;
-   struct argdata *data;
    struct textlist* check;
 
    identity=(char*)videntity;
-   data=(struct argdata*)vdata;
    check=(struct textlist*)userdata;
 
    return textlist_addline(check,identity);
@@ -399,12 +395,11 @@ int arglist_isinteger (char* text){
   -1 if not
 */
 
-   int t,len,result,isnegative;
+   int t,len,result;
 
 
    if (text==NULL) return -1;
    t=0;
-   isnegative=0;
    len=strlen(text);
    result=0;
    if (len==0) return 0;
@@ -412,9 +407,7 @@ int arglist_isinteger (char* text){
       result*=10;
       if ((text[t]<'0') || (text[t]>'9')) {
          if (text[t]=='-') {
-	    if (result==0) {
-	       isnegative=1;
-	    } else {
+	    if (result!=0) {
 	       return -1;
 	    }
 	 } else if (text[t]==' ') {
